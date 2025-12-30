@@ -13,12 +13,19 @@ class AdaadConfig:
     planner_max_steps: int = 25
     planner_max_seconds: float = 2.0
     log_schema_version: str = "1"
+    ledger_enabled: bool = False
+    ledger_dir: str = ".adaad/ledger"
+    ledger_filename: str = "events.jsonl"
 
     def validate(self) -> None:
         if self.planner_max_steps <= 0:
             raise ValueError("planner_max_steps must be > 0")
         if self.planner_max_seconds <= 0:
             raise ValueError("planner_max_seconds must be > 0")
+        if self.ledger_enabled and not self.ledger_dir:
+            raise ValueError("ledger_dir must be set when ledger logging is enabled")
+        if self.ledger_enabled and not self.ledger_filename:
+            raise ValueError("ledger_filename must be set when ledger logging is enabled")
 
 
 def _coerce_bool(value: str) -> bool:
@@ -75,12 +82,25 @@ def load_config(env: Mapping[str, str] | None = None) -> AdaadConfig:
 
     log_schema_version = _get_env(source, "LOG_SCHEMA_VERSION") or AdaadConfig.log_schema_version
 
+    ledger_enabled_raw = _get_env(source, "LEDGER_ENABLED")
+    ledger_enabled = (
+        _coerce_bool(ledger_enabled_raw)
+        if ledger_enabled_raw is not None
+        else AdaadConfig.ledger_enabled
+    )
+
+    ledger_dir = _get_env(source, "LEDGER_DIR") or AdaadConfig.ledger_dir
+    ledger_filename = _get_env(source, "LEDGER_FILENAME") or AdaadConfig.ledger_filename
+
     cfg = AdaadConfig(
         version=version,
         mutation_enabled=mutation_enabled,
         planner_max_steps=planner_max_steps,
         planner_max_seconds=planner_max_seconds,
         log_schema_version=log_schema_version,
+        ledger_enabled=ledger_enabled,
+        ledger_dir=ledger_dir,
+        ledger_filename=ledger_filename,
     )
     cfg.validate()
     return cfg
