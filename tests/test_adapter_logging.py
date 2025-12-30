@@ -1,7 +1,9 @@
 import unittest
+from tempfile import TemporaryDirectory
 
 from adaad6.adapters.base import AdapterResult, BaseAdapter, idempotency_key
 from adaad6.config import AdaadConfig
+from adaad6.provenance.ledger import read_events
 
 
 class EchoAdapter(BaseAdapter):
@@ -36,6 +38,30 @@ class AdapterLoggingTest(unittest.TestCase):
         key_first = idempotency_key(intent, inputs)
         key_second = idempotency_key(intent, inputs)
         self.assertEqual(key_first, key_second)
+
+
+class AdapterLedgerTest(unittest.TestCase):
+    def test_adapter_appends_to_ledger_when_enabled(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir)
+            adapter = EchoAdapter()
+            now = lambda: "2024-01-01T00:00:00Z"
+            intent = "echo"
+            inputs = {"message": "hello"}
+
+            result: AdapterResult = adapter.run(
+                intent=intent, inputs=inputs, actor="tester", cfg=cfg, now_fn=now
+            )
+
+            self.assertTrue(result.log["ledger_appended"])
+            self.assertIsNone(result.log["ledger_error"])
+            self.assertIsNotNone(result.log["ledger_event_hash"])
+
+            events = read_events(cfg)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["type"], "adapter_call")
+            expected_payload = {k: v for k, v in result.log.items() if not k.startswith("ledger_")}
+            self.assertEqual(events[0]["payload"], expected_payload)
 
 
 if __name__ == "__main__":

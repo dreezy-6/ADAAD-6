@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from adaad6.assurance.logging import build_log_event, compute_checksum
 from adaad6.config import AdaadConfig
+from adaad6.provenance.ledger import append_event
 
 
 def idempotency_key(intent: str, inputs: dict[str, Any]) -> str:
@@ -41,15 +42,44 @@ class BaseAdapter:
         cfg.validate()
         timestamp_fn = now_fn or self._utc_now_iso_z
         outputs = self._execute(intent=intent, inputs=inputs, cfg=cfg)
+        ts = timestamp_fn()
         log_event = build_log_event(
             schema_version=cfg.log_schema_version,
-            ts=timestamp_fn(),
+            ts=ts,
             actor=actor,
             intent=intent,
             inputs=inputs,
             outputs=outputs,
         )
-        return AdapterResult(ok=True, output=outputs, log=log_event.to_dict())
+        log_base = log_event.to_dict()
+
+        ledger_appended = False
+        ledger_event_hash: str | None = None
+        ledger_error: str | None = None
+
+        if cfg.ledger_enabled:
+            try:
+                event = append_event(
+                    cfg=cfg,
+                    event_type="adapter_call",
+                    payload=log_base,
+                    ts=ts,
+                    actor=actor,
+                )
+                ledger_appended = True
+                hash_value = event.get("hash")
+                ledger_event_hash = hash_value if isinstance(hash_value, str) else None
+            except Exception as exc:  # pragma: no cover - defensive
+                ledger_appended = False
+                ledger_error = str(exc)
+
+        log_dict = log_base | {
+            "ledger_appended": ledger_appended,
+            "ledger_error": ledger_error,
+            "ledger_event_hash": ledger_event_hash,
+        }
+
+        return AdapterResult(ok=True, output=outputs, log=log_dict)
 
 
 __all__ = ["BaseAdapter", "AdapterResult", "idempotency_key"]
