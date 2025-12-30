@@ -8,7 +8,7 @@ from adaad6.provenance import append_event, ledger_path, read_events, verify_cha
 class LedgerAppendOnlyTest(unittest.TestCase):
     def test_append_events_and_verify_chain(self) -> None:
         with TemporaryDirectory() as tmpdir:
-            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir, ledger_file="events.jsonl")
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir, ledger_filename="events.jsonl")
 
             first = append_event(cfg, "alpha", {"value": 1}, "2024-01-01T00:00:00Z", "tester")
             second = append_event(cfg, "beta", {"value": 2}, "2024-01-01T00:01:00Z", "tester")

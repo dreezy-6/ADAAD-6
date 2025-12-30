@@ -36,7 +36,7 @@ def _ledger_dirs_status(cfg: AdaadConfig) -> tuple[bool, str | None]:
         return True, None
 
     ledger_dir = Path(cfg.ledger_dir)
-    ledger_file_path = ledger_dir / cfg.ledger_file
+    ledger_file_path = ledger_dir / cfg.ledger_filename
     ledger_file_parent = ledger_file_path.parent
 
     if ledger_dir.exists():
