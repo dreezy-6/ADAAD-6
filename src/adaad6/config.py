@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass
 from os import environ
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Mapping, MutableMapping
@@ -16,8 +16,25 @@ class AdaadConfig:
     log_schema_version: str = "1"
     ledger_enabled: bool = False
     ledger_dir: str = ".adaad/ledger"
-    ledger_file: str = "events.jsonl"
+    ledger_filename: str = "events.jsonl"
     ledger_schema_version: str = "1"
+    ledger_file: InitVar[str | None] = None
+
+    def __post_init__(self, ledger_file: str | None) -> None:
+        normalized = (self.ledger_filename or "").strip()
+        object.__setattr__(self, "ledger_filename", normalized)
+        if ledger_file is not None and self.ledger_filename == AdaadConfig.ledger_filename:
+            object.__setattr__(self, "ledger_filename", (ledger_file or "").strip())
+
+    def __getattribute__(self, name: str):
+        if name == "ledger_file":
+            raise AttributeError(name)
+        return super().__getattribute__(name)
+
+    def __getattr__(self, name: str) -> str:
+        if name == "ledger_file":
+            return self.ledger_filename
+        raise AttributeError(name)
 
     def validate(self) -> None:
         if self.planner_max_steps <= 0:
@@ -26,19 +43,19 @@ class AdaadConfig:
             raise ValueError("planner_max_seconds must be > 0")
         if self.ledger_enabled and not (self.ledger_dir or "").strip():
             raise ValueError("ledger_dir must be set when ledger logging is enabled")
-        if self.ledger_enabled and not (self.ledger_file or "").strip():
-            raise ValueError("ledger_file must be set when ledger logging is enabled")
+        if self.ledger_enabled and not (self.ledger_filename or "").strip():
+            raise ValueError("ledger_filename must be set when ledger logging is enabled")
         if self.ledger_enabled:
-            ledger_file_raw = (self.ledger_file or "").strip()
+            ledger_file_raw = (self.ledger_filename or "").strip()
             ledger_file_posix = PurePosixPath(ledger_file_raw)
             ledger_file_windows = PureWindowsPath(ledger_file_raw)
 
             if ledger_file_posix.is_absolute() or ledger_file_windows.is_absolute() or ledger_file_windows.drive:
-                raise ValueError("ledger_file must be a relative path")
+                raise ValueError("ledger_filename must be a relative path")
             if ledger_file_raw.startswith("~"):
-                raise ValueError("ledger_file must not start with ~")
+                raise ValueError("ledger_filename must not start with ~")
             if ".." in ledger_file_posix.parts or ".." in ledger_file_windows.parts:
-                raise ValueError("ledger_file must not contain parent directory traversal")
+                raise ValueError("ledger_filename must not contain parent directory traversal")
             if not (self.ledger_schema_version or "").strip():
                 raise ValueError("ledger_schema_version must be set when ledger logging is enabled")
 
@@ -107,7 +124,7 @@ def load_config(env: Mapping[str, str] | None = None) -> AdaadConfig:
     ledger_dir = _get_env(source, "LEDGER_DIR") or AdaadConfig.ledger_dir
     ledger_file_env = _get_env(source, "LEDGER_FILE")
     ledger_filename_env = _get_env(source, "LEDGER_FILENAME")
-    ledger_file = ledger_file_env or ledger_filename_env or AdaadConfig.ledger_file
+    ledger_filename = ledger_file_env or ledger_filename_env or AdaadConfig.ledger_filename
 
     ledger_schema_version = (
         _get_env(source, "LEDGER_SCHEMA_VERSION")
@@ -123,7 +140,7 @@ def load_config(env: Mapping[str, str] | None = None) -> AdaadConfig:
         log_schema_version=log_schema_version,
         ledger_enabled=ledger_enabled,
         ledger_dir=ledger_dir,
-        ledger_file=ledger_file,
+        ledger_filename=ledger_filename,
         ledger_schema_version=ledger_schema_version,
     )
     cfg.validate()

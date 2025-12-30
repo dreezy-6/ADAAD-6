@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections import deque
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -12,75 +11,67 @@ from adaad6.provenance.hashchain import compute_event_hash
 
 
 def ledger_path(cfg: AdaadConfig) -> Path:
-    return Path(cfg.ledger_dir) / cfg.ledger_file
+    return Path(cfg.ledger_dir) / cfg.ledger_filename
 
 
 def ensure_ledger(cfg: AdaadConfig) -> Path:
     if not cfg.ledger_enabled:
-        raise RuntimeError("Ledger is disabled by configuration")
-
+        raise RuntimeError("Ledger is disabled")
+    if not (cfg.ledger_dir or "").strip() or not (cfg.ledger_filename or "").strip():
+        raise ValueError("Ledger directory and file must be set when ledger is enabled")
     path = ledger_path(cfg)
     path.parent.mkdir(parents=True, exist_ok=True)
-
     if path.exists() and path.is_dir():
         raise RuntimeError(f"Ledger path {path} is a directory, expected a file")
-
     path.touch(exist_ok=True)
     return path
 
 
-def _read_raw_events(path: Path, limit: int | None = None) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
+def _last_hash(path: Path) -> str | None:
+    last_line = ""
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                last_line = line
+    if not last_line:
+        return None
+    last_event = json.loads(last_line)
+    return last_event.get("hash")
 
-    events: deque[dict[str, Any]] | list[dict[str, Any]]
-    if limit is None:
-        events = []
-    else:
-        events = deque(maxlen=limit)
 
-    with path.open("r", encoding="utf-8") as ledger_file:
-        for line in ledger_file:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            parsed = json.loads(stripped)
-            events.append(parsed)
-
-    return list(events)
+def append_event(cfg: AdaadConfig, event_type: str, payload: dict[str, Any], ts: str, actor: str) -> dict[str, Any]:
+    path = ensure_ledger(cfg)
+    prev_hash = _last_hash(path)
+    event_without_hash = {
+        "schema_version": cfg.ledger_schema_version,
+        "event_id": str(uuid4()),
+        "ts": ts,
+        "actor": actor,
+        "type": event_type,
+        "payload": payload,
+        "prev_hash": prev_hash,
+    }
+    event_hash = compute_event_hash(event_without_hash)
+    event = dict(event_without_hash, hash=event_hash)
+    serialized = canonical_json(event)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(serialized + "\n")
+    return event
 
 
 def read_events(cfg: AdaadConfig, limit: int | None = None) -> list[dict[str, Any]]:
     if not cfg.ledger_enabled:
-        raise RuntimeError("Ledger is disabled by configuration")
-
-    path = ledger_path(cfg)
-    return _read_raw_events(path, limit=limit)
-
-
-def append_event(
-    cfg: AdaadConfig, event_type: str, payload: dict[str, Any], ts: str, actor: str
-) -> dict[str, Any]:
+        raise RuntimeError("Ledger is disabled")
     path = ensure_ledger(cfg)
-    existing = _read_raw_events(path, limit=1)
-    prev_hash = existing[0]["hash"] if existing else None
-
-    event_without_hash: dict[str, Any] = {
-        "schema_version": cfg.ledger_schema_version,
-        "event_id": str(uuid4()),
-        "type": event_type,
-        "payload": payload,
-        "ts": ts,
-        "actor": actor,
-        "prev_hash": prev_hash,
-    }
-    event_hash = compute_event_hash(event_without_hash)
-    event = {**event_without_hash, "hash": event_hash}
-
-    with path.open("a", encoding="utf-8") as ledger_file:
-        ledger_file.write(canonical_json(event) + "\n")
-
-    return event
+    events: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            events.append(json.loads(line))
+    if limit is None:
+        return events
+    return events[-limit:]
 
 
-__all__ = ["ledger_path", "ensure_ledger", "append_event", "read_events"]
+__all__ = ["append_event", "ensure_ledger", "ledger_path", "read_events"]

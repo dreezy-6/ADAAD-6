@@ -41,7 +41,7 @@ class RuntimeHealthTest(unittest.TestCase):
             ledger_dir.mkdir(parents=True, exist_ok=True)
             ledger_file_dir = ledger_dir / "events.jsonl"
             ledger_file_dir.mkdir(parents=True, exist_ok=True)
-            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(ledger_dir), ledger_file="events.jsonl")
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(ledger_dir), ledger_filename="events.jsonl")
 
             result = check_structure_details(cfg=cfg)
 
@@ -51,7 +51,7 @@ class RuntimeHealthTest(unittest.TestCase):
     def test_ledger_file_parent_needs_creation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             ledger_dir = Path(tmpdir) / "ledger"
-            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(ledger_dir), ledger_file="nested/events.jsonl")
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(ledger_dir), ledger_filename="nested/events.jsonl")
 
             result = check_structure_details(cfg=cfg)
 
@@ -64,7 +64,7 @@ class RuntimeHealthTest(unittest.TestCase):
             ledger_dir.mkdir(parents=True, exist_ok=True)
             bad_parent = ledger_dir / "nested"
             bad_parent.write_text("not a dir", encoding="utf-8")
-            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(ledger_dir), ledger_file="nested/events.jsonl")
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(ledger_dir), ledger_filename="nested/events.jsonl")
 
             result = check_structure_details(cfg=cfg)
 

@@ -17,7 +17,7 @@ class EchoAdapter(BaseAdapter):
 class AdapterLedgerWriteTest(unittest.TestCase):
     def test_adapter_appends_adapter_call_event(self) -> None:
         with TemporaryDirectory() as tmpdir:
-            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir, ledger_file="events.jsonl")
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir, ledger_filename="events.jsonl")
             adapter = EchoAdapter()
             ts = "2024-05-05T05:05:05Z"
             intent = "echo"

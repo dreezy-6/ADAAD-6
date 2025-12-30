@@ -32,14 +32,14 @@ class BootSequenceTest(unittest.TestCase):
 
     def test_boot_ledger_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir, ledger_file="events.jsonl")
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir, ledger_filename="events.jsonl")
 
             result = boot_sequence(cfg=cfg)
 
             self.assertTrue(result["ledger"]["enabled"])
             self.assertTrue(result["ledger"]["ok"])
             self.assertTrue(result["ledger"]["dirs_ok"])
-            self.assertEqual(Path(result["ledger"]["path"]).name, cfg.ledger_file)
+            self.assertEqual(Path(result["ledger"]["path"]).name, cfg.ledger_filename)
             self.assertTrue(Path(result["ledger"]["path"]).exists())
             self.assertTrue(result["ok"])
             self.assertIsNone(result["ledger"]["error"])
@@ -52,7 +52,7 @@ class BootSequenceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             ledger_file_dir = Path(tmpdir) / "events.jsonl"
             ledger_file_dir.mkdir(parents=True, exist_ok=True)
-            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir, ledger_file="events.jsonl")
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir, ledger_filename="events.jsonl")
 
             result = boot_sequence(cfg=cfg)
 
