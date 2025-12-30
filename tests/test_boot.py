@@ -22,10 +22,13 @@ class BootSequenceTest(unittest.TestCase):
         self.assertEqual(result["limits"]["planner_max_seconds"], 2.0)
         self.assertTrue(result["ledger"]["enabled"] is False)
         self.assertTrue(result["ledger"]["ok"])
+        self.assertTrue(result["ledger"]["dirs_ok"])
         self.assertIsNone(result["ledger"]["path"])
         self.assertIsNone(result["ledger"]["error"])
         self.assertIn("ledger", result["checks"])
         self.assertTrue(result["checks"]["ledger"])
+        self.assertIn("ledger_dirs", result["checks"])
+        self.assertTrue(result["checks"]["ledger_dirs"])
 
     def test_boot_ledger_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -35,12 +38,15 @@ class BootSequenceTest(unittest.TestCase):
 
             self.assertTrue(result["ledger"]["enabled"])
             self.assertTrue(result["ledger"]["ok"])
+            self.assertTrue(result["ledger"]["dirs_ok"])
             self.assertEqual(Path(result["ledger"]["path"]).name, cfg.ledger_file)
             self.assertTrue(Path(result["ledger"]["path"]).exists())
             self.assertTrue(result["ok"])
             self.assertIsNone(result["ledger"]["error"])
             self.assertIn("ledger", result["checks"])
             self.assertTrue(result["checks"]["ledger"])
+            self.assertIn("ledger_dirs", result["checks"])
+            self.assertTrue(result["checks"]["ledger_dirs"])
 
     def test_boot_ledger_failure_sets_ok_false(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -52,11 +58,14 @@ class BootSequenceTest(unittest.TestCase):
 
             self.assertTrue(result["ledger"]["enabled"])
             self.assertFalse(result["ledger"]["ok"])
+            self.assertFalse(result["ledger"]["dirs_ok"])
             self.assertIsNone(result["ledger"]["path"])
             self.assertIsNotNone(result["ledger"]["error"])
             self.assertFalse(result["ok"])
             self.assertIn("ledger", result["checks"])
             self.assertFalse(result["checks"]["ledger"])
+            self.assertIn("ledger_dirs", result["checks"])
+            self.assertFalse(result["checks"]["ledger_dirs"])
 
 
 if __name__ == "__main__":
