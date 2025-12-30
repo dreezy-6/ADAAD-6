@@ -12,7 +12,7 @@ from adaad6.provenance.hashchain import compute_event_hash
 
 
 def ledger_path(cfg: AdaadConfig) -> Path:
-    return Path(cfg.ledger_dir) / cfg.ledger_filename
+    return Path(cfg.ledger_dir) / cfg.ledger_file
 
 
 def ensure_ledger(cfg: AdaadConfig) -> Path:
@@ -66,7 +66,7 @@ def append_event(
     prev_hash = existing[0]["hash"] if existing else None
 
     event_without_hash: dict[str, Any] = {
-        "schema_version": cfg.log_schema_version,
+        "schema_version": cfg.ledger_schema_version,
         "event_id": str(uuid4()),
         "type": event_type,
         "payload": payload,

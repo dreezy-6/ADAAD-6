@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from os import environ
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Mapping, MutableMapping
 
 
@@ -15,17 +16,31 @@ class AdaadConfig:
     log_schema_version: str = "1"
     ledger_enabled: bool = False
     ledger_dir: str = ".adaad/ledger"
-    ledger_filename: str = "events.jsonl"
+    ledger_file: str = "events.jsonl"
+    ledger_schema_version: str = "1"
 
     def validate(self) -> None:
         if self.planner_max_steps <= 0:
             raise ValueError("planner_max_steps must be > 0")
         if self.planner_max_seconds <= 0:
             raise ValueError("planner_max_seconds must be > 0")
-        if self.ledger_enabled and not self.ledger_dir:
+        if self.ledger_enabled and not (self.ledger_dir or "").strip():
             raise ValueError("ledger_dir must be set when ledger logging is enabled")
-        if self.ledger_enabled and not self.ledger_filename:
-            raise ValueError("ledger_filename must be set when ledger logging is enabled")
+        if self.ledger_enabled and not (self.ledger_file or "").strip():
+            raise ValueError("ledger_file must be set when ledger logging is enabled")
+        if self.ledger_enabled:
+            ledger_file_raw = (self.ledger_file or "").strip()
+            ledger_file_posix = PurePosixPath(ledger_file_raw)
+            ledger_file_windows = PureWindowsPath(ledger_file_raw)
+
+            if ledger_file_posix.is_absolute() or ledger_file_windows.is_absolute() or ledger_file_windows.drive:
+                raise ValueError("ledger_file must be a relative path")
+            if ledger_file_raw.startswith("~"):
+                raise ValueError("ledger_file must not start with ~")
+            if ".." in ledger_file_posix.parts or ".." in ledger_file_windows.parts:
+                raise ValueError("ledger_file must not contain parent directory traversal")
+            if not (self.ledger_schema_version or "").strip():
+                raise ValueError("ledger_schema_version must be set when ledger logging is enabled")
 
 
 def _coerce_bool(value: str) -> bool:
@@ -90,7 +105,15 @@ def load_config(env: Mapping[str, str] | None = None) -> AdaadConfig:
     )
 
     ledger_dir = _get_env(source, "LEDGER_DIR") or AdaadConfig.ledger_dir
-    ledger_filename = _get_env(source, "LEDGER_FILENAME") or AdaadConfig.ledger_filename
+    ledger_file_env = _get_env(source, "LEDGER_FILE")
+    ledger_filename_env = _get_env(source, "LEDGER_FILENAME")
+    ledger_file = ledger_file_env or ledger_filename_env or AdaadConfig.ledger_file
+
+    ledger_schema_version = (
+        _get_env(source, "LEDGER_SCHEMA_VERSION")
+        # default ledger schema matches log schema unless explicitly overridden
+        or log_schema_version
+    )
 
     cfg = AdaadConfig(
         version=version,
@@ -100,7 +123,8 @@ def load_config(env: Mapping[str, str] | None = None) -> AdaadConfig:
         log_schema_version=log_schema_version,
         ledger_enabled=ledger_enabled,
         ledger_dir=ledger_dir,
-        ledger_filename=ledger_filename,
+        ledger_file=ledger_file,
+        ledger_schema_version=ledger_schema_version,
     )
     cfg.validate()
     return cfg

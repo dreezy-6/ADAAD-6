@@ -21,7 +21,12 @@ class ProvenanceLedgerTest(unittest.TestCase):
 
     def test_append_and_read_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir, ledger_filename="events.jsonl")
+            cfg = AdaadConfig(
+                ledger_enabled=True,
+                ledger_dir=tmpdir,
+                ledger_file="events.jsonl",
+                ledger_schema_version="2",
+            )
             ensure_ledger(cfg)
 
             first = append_event(cfg, "test", {"one": 1}, "2024-01-01T00:00:00Z", "tester")
@@ -38,12 +43,12 @@ class ProvenanceLedgerTest(unittest.TestCase):
 
             self.assertIn("event_id", events[0])
             self.assertIn("event_id", events[1])
-            self.assertEqual(events[0]["schema_version"], cfg.log_schema_version)
-            self.assertEqual(events[1]["schema_version"], cfg.log_schema_version)
+            self.assertEqual(events[0]["schema_version"], cfg.ledger_schema_version)
+            self.assertEqual(events[1]["schema_version"], cfg.ledger_schema_version)
 
     def test_verify_chain_detects_tampering(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir, ledger_filename="events.jsonl")
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir, ledger_file="events.jsonl")
 
             append_event(cfg, "test", {"value": 1}, "2024-01-01T00:00:00Z", "tester")
             append_event(cfg, "test", {"value": 2}, "2024-01-01T00:01:00Z", "tester")
