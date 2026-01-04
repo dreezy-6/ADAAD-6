@@ -22,12 +22,12 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(cfg.ledger_schema_version, "9")
 
     def test_ledger_file_attribute_alias(self) -> None:
-        cfg = AdaadConfig(ledger_enabled=True, ledger_dir="x", ledger_file="events.jsonl")
+        cfg = AdaadConfig(ledger_enabled=True, ledger_dir=".adaad/ledger", ledger_file="events.jsonl")
         self.assertEqual(cfg.ledger_file, "events.jsonl")
         self.assertEqual(cfg.ledger_filename, "events.jsonl")
 
     def test_legacy_does_not_override_explicit_filename(self) -> None:
-        cfg = AdaadConfig(ledger_enabled=True, ledger_dir="x", ledger_filename="new.jsonl", ledger_file="old.jsonl")
+        cfg = AdaadConfig(ledger_enabled=True, ledger_dir=".adaad/ledger", ledger_filename="new.jsonl", ledger_file="old.jsonl")
         self.assertEqual(cfg.ledger_filename, "new.jsonl")
         self.assertEqual(cfg.ledger_file, "new.jsonl")
 

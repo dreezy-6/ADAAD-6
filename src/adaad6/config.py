@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import os
@@ -10,6 +9,8 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Mapping
 
 ENV_PREFIX = "ADAAD6_"
+CONFIG_SCHEMA_VERSION = "1"
+SIG_ALG = "HMAC-SHA256"
 
 
 class MutationPolicy(str, Enum):
@@ -24,6 +25,11 @@ class ResourceTier(str, Enum):
     SERVER = "server"
 
 
+class RunMode(str, Enum):
+    DEV = "dev"
+    PROD = "prod"
+
+
 @dataclass(frozen=True)
 class AdaadConfig:
     version: str = "0.0.0"
@@ -35,6 +41,10 @@ class AdaadConfig:
     planner_max_steps: int = 25
     planner_max_seconds: float = 2.0
 
+    mode: RunMode = RunMode.DEV
+    config_schema_version: str = CONFIG_SCHEMA_VERSION
+    home_dir: str = "."
+
     resource_tier: ResourceTier = ResourceTier.MOBILE
     resource_scaling: float = 1.0  # derived, deterministic
 
@@ -43,13 +53,35 @@ class AdaadConfig:
     ledger_enabled: bool = False
     ledger_dir: str = ".adaad/ledger"
     ledger_filename: str = "events.jsonl"
+    ledger_file: str | None = None
     ledger_schema_version: str = "1"
     ledger_readonly: bool = False
 
     emergency_halt: bool = False
     agents_enabled: bool = True
 
+    freeze_reason: str | None = None
+
+    @property
+    def mutation_enabled(self) -> bool:
+        return not self.emergency_halt and self.mutation_policy != MutationPolicy.LOCKED
+
+    def __post_init__(self) -> None:
+        # honor legacy ledger_file alias without overriding explicit filename
+        default_filename = type(self).ledger_filename
+        if self.ledger_file and (self.ledger_filename == default_filename or not self.ledger_filename):
+            object.__setattr__(self, "ledger_filename", self.ledger_file)
+        if self.ledger_file is None:
+            object.__setattr__(self, "ledger_file", self.ledger_filename)
+        elif self.ledger_file != self.ledger_filename:
+            object.__setattr__(self, "ledger_file", self.ledger_filename)
+
     def validate(self) -> None:
+        if (self.config_schema_version or "").strip() != CONFIG_SCHEMA_VERSION:
+            raise ValueError("config_schema_version mismatch")
+
+        home = Path(self.home_dir).expanduser().resolve()
+
         # hard caps
         if not (1 <= self.planner_max_steps <= 10_000):
             raise ValueError("planner_max_steps must be 1..10000")
@@ -79,7 +111,7 @@ class AdaadConfig:
             if not (self.ledger_schema_version or "").strip():
                 raise ValueError("ledger_schema_version must be set when ledger logging is enabled")
 
-            _enforce_ledger_dir_sandbox(self.ledger_dir)
+            _enforce_ledger_dir_sandbox(self.ledger_dir, home=home)
 
         if self.emergency_halt:
             # freeze must dominate any other settings
@@ -93,6 +125,11 @@ class AdaadConfig:
 
 def _get_env(env: Mapping[str, str], key: str) -> str | None:
     return env.get(f"{ENV_PREFIX}{key}")
+
+
+def _require_sig_alg(env: Mapping[str, str]) -> bool:
+    alg = (_get_env(env, "CONFIG_SIG_ALG") or "").strip()
+    return bool(alg) and alg.upper() == SIG_ALG
 
 
 def _coerce_bool(value: str) -> bool:
@@ -129,8 +166,19 @@ def _coerce_enum(value: str, enum_cls, field: str):
         raise ValueError(f"Invalid {field}: {value}. Allowed: {allowed}") from exc
 
 
+def _get_sig_key(env: Mapping[str, str], mode: RunMode) -> str | None:
+    # DEV: allow env key for local testing.
+    # PROD: must be replaced with secure store integration. For now, returns None.
+    key = _get_env(env, "CONFIG_SIG_KEY")
+    if mode == RunMode.PROD:
+        # reject env-provided key in production
+        if key:
+            return None
+        return None
+    return key
+
+
 def _canonical_env_payload(env: Mapping[str, str]) -> bytes:
-    # include only ADAAD6_ vars, exclude secrets and signature fields
     excluded = {
         f"{ENV_PREFIX}CONFIG_SIG",
         f"{ENV_PREFIX}CONFIG_SIG_ALG",
@@ -144,20 +192,34 @@ def _canonical_env_payload(env: Mapping[str, str]) -> bytes:
             continue
         items.append((k, v))
     items.sort(key=lambda kv: kv[0])
-    # canonical format: key=value\n, utf-8
     return "".join([f"{k}={v}\n" for k, v in items]).encode("utf-8")
 
 
 def _verify_env_signature(env: Mapping[str, str]) -> bool:
+    if (_get_env(env, "CONFIG_SCHEMA_VERSION") or "").strip() != CONFIG_SCHEMA_VERSION:
+        return False
+    if not _require_sig_alg(env):
+        return False
+
     sig_hex = _get_env(env, "CONFIG_SIG")
     if not sig_hex:
         return False
-    key = _get_env(env, "CONFIG_SIG_KEY")
+
+    mode = _coerce_enum(_get_env(env, "MODE") or RunMode.DEV.value, RunMode, "mode")
+    key = _get_sig_key(env, mode)
     if not key:
         return False
+
     payload = _canonical_env_payload(env)
     mac = hmac.new(key.encode("utf-8"), payload, hashlib.sha256).hexdigest()
     return hmac.compare_digest(mac, sig_hex.strip().lower())
+
+
+def _resolve_home(env: Mapping[str, str]) -> Path:
+    raw = _get_env(env, "HOME")
+    if raw and raw.strip():
+        return Path(raw).expanduser().resolve()
+    return Path(".").resolve()
 
 
 def _resource_scaling_for_tier(tier: ResourceTier) -> float:
@@ -169,26 +231,29 @@ def _resource_scaling_for_tier(tier: ResourceTier) -> float:
     return 1.0  # server
 
 
-def _enforce_ledger_dir_sandbox(ledger_dir: str) -> None:
-    base = Path(".adaad").resolve()
+def _enforce_ledger_dir_sandbox(ledger_dir: str, home: Path) -> None:
+    base = (home / ".adaad").resolve()
     target = Path(ledger_dir)
 
     # resolve without requiring existence
     try:
         target_resolved = target.resolve(strict=False)
     except TypeError:
-        # python < 3.9 fallback
         target_resolved = Path(os.path.abspath(str(target)))
+
+    if not target_resolved.is_absolute():
+        target_resolved = (home / target_resolved).resolve()
 
     if base not in target_resolved.parents and target_resolved != base:
         raise ValueError("ledger_dir must resolve under .adaad/ (sandbox violation)")
 
-    # symlink detection on existing path segments
-    probe = Path(target_resolved.root) if target_resolved.is_absolute() else Path(".").resolve()
-    for part in target_resolved.parts:
-        # skip root markers
-        if part in ("/", "\\"):
-            continue
+    try:
+        rel = target_resolved.relative_to(base)
+    except Exception as exc:
+        raise ValueError("ledger_dir sandbox violation") from exc
+
+    probe = base
+    for part in rel.parts:
         probe = probe / part
         if probe.exists() and probe.is_symlink():
             raise ValueError("ledger_dir must not traverse symlinks (sandbox violation)")
@@ -196,6 +261,10 @@ def _enforce_ledger_dir_sandbox(ledger_dir: str) -> None:
 
 def load_config(env: Mapping[str, str] | None = None) -> AdaadConfig:
     source: Mapping[str, str] = env or os.environ
+
+    mode = _coerce_enum(_get_env(source, "MODE") or RunMode.DEV.value, RunMode, "mode")
+    cfg_schema = _get_env(source, "CONFIG_SCHEMA_VERSION") or CONFIG_SCHEMA_VERSION
+    home = _resolve_home(source)
 
     emergency_halt_raw = _get_env(source, "EMERGENCY_HALT")
     emergency_halt = _coerce_bool(emergency_halt_raw) if emergency_halt_raw else False
@@ -209,18 +278,22 @@ def load_config(env: Mapping[str, str] | None = None) -> AdaadConfig:
     if sig_required and not sig_ok:
         cfg = AdaadConfig(
             version=_get_env(source, "VERSION") or AdaadConfig.version,
+            mode=mode,
+            config_schema_version=cfg_schema,
+            home_dir=str(home),
             mutation_policy=MutationPolicy.LOCKED,
             planner_max_steps=1,
             planner_max_seconds=0.01,
             log_schema_version=_get_env(source, "LOG_SCHEMA_VERSION") or AdaadConfig.log_schema_version,
             ledger_enabled=True,
             ledger_dir=_get_env(source, "LEDGER_DIR") or AdaadConfig.ledger_dir,
-            ledger_filename=_get_env(source, "LEDGER_FILENAME") or AdaadConfig.ledger_filename,
+            ledger_filename=_get_env(source, "LEDGER_FILE") or _get_env(source, "LEDGER_FILENAME") or AdaadConfig.ledger_filename,
             ledger_schema_version=_get_env(source, "LEDGER_SCHEMA_VERSION")
             or (_get_env(source, "LOG_SCHEMA_VERSION") or AdaadConfig.log_schema_version),
             ledger_readonly=True,
             emergency_halt=True,
             agents_enabled=False,
+            freeze_reason="CONFIG_SIG_INVALID",
             resource_tier=_coerce_enum(_get_env(source, "RESOURCE_TIER") or "mobile", ResourceTier, "resource_tier"),
             resource_scaling=_resource_scaling_for_tier(
                 _coerce_enum(_get_env(source, "RESOURCE_TIER") or "mobile", ResourceTier, "resource_tier")
@@ -280,6 +353,9 @@ def load_config(env: Mapping[str, str] | None = None) -> AdaadConfig:
 
     cfg = AdaadConfig(
         version=version,
+        mode=mode,
+        config_schema_version=cfg_schema,
+        home_dir=str(home),
         mutation_policy=mutation_policy,
         readiness_gate_sig=readiness_gate_sig,
         planner_max_steps=planner_max_steps,
@@ -294,9 +370,10 @@ def load_config(env: Mapping[str, str] | None = None) -> AdaadConfig:
         ledger_readonly=ledger_readonly,
         emergency_halt=emergency_halt,
         agents_enabled=agents_enabled,
+        freeze_reason="EMERGENCY_HALT" if emergency_halt else None,
     )
     cfg.validate()
     return cfg
 
 
-__all__ = ["AdaadConfig", "MutationPolicy", "ResourceTier", "load_config"]
+__all__ = ["AdaadConfig", "MutationPolicy", "ResourceTier", "RunMode", "load_config"]

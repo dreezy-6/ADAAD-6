@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from adaad6.config import AdaadConfig, load_config
@@ -9,6 +10,11 @@ from adaad6.provenance.ledger import ensure_ledger
 
 def boot_sequence(cfg: AdaadConfig | None = None) -> dict[str, Any]:
     config = cfg or load_config()
+
+    if config.emergency_halt or not config.agents_enabled:
+        frozen_reason = config.freeze_reason or ("EMERGENCY_HALT" if config.emergency_halt else None)
+        return {"ok": False, "frozen": True, "frozen_reason": frozen_reason, "config": asdict(config)}
+
     config.validate()
     structure_checks = health.check_structure_details(cfg=config)
     structure_ok = structure_checks["structure"]
