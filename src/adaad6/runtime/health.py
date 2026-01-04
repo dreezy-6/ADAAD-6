@@ -12,6 +12,76 @@ def _package_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _required_entries() -> set[str]:
+    return {
+        "__init__.py",
+        "config.py",
+        "runtime",
+        "planning",
+        "adapters",
+        "assurance",
+        "kernel",
+        "provenance",
+    }
+
+
+def _allowed_dirs() -> set[str]:
+    return {
+        "runtime",
+        "planning",
+        "adapters",
+        "assurance",
+        "kernel",
+        "provenance",
+    }
+
+
+def _allowed_files() -> set[str]:
+    return {
+        "__init__.py",
+        "config.py",
+        "py.typed",
+        "version.py",
+        "_version.py",
+    }
+
+
+def _ignored_entries() -> set[str]:
+    return {"__pycache__", ".DS_Store"}
+
+
+def _is_allowed_file(name: str) -> bool:
+    return name in _allowed_files()
+
+
+def _tree_law_status() -> tuple[bool, str | None]:
+    root = _package_root()
+    required = _required_entries()
+    allowed_dirs = _allowed_dirs()
+    ignored = _ignored_entries()
+    missing = sorted(entry for entry in required if not (root / entry).exists())
+    if missing:
+        return False, f"Missing required entries in package root: {', '.join(missing)}"
+
+    extras: list[str] = []
+    for item in root.iterdir():
+        name = item.name
+        if name in ignored or name.startswith(".") or name.endswith(".pyc"):
+            continue
+        if item.is_dir():
+            if name not in allowed_dirs:
+                extras.append(name)
+        elif item.is_file():
+            if not _is_allowed_file(name):
+                extras.append(name)
+        else:
+            extras.append(name)
+
+    if extras:
+        return False, f"Unexpected entries in package root: {', '.join(sorted(extras))}"
+    return True, None
+
+
 def _can_write_to_dir(directory: Path) -> tuple[bool, str | None]:
     try:
         fd, path_str = tempfile.mkstemp(dir=directory, prefix=".__adaad_health__")
@@ -113,21 +183,18 @@ def check_structure_details(cfg: AdaadConfig | None = None) -> dict[str, Any]:
     config = cfg or AdaadConfig()
 
     root = _package_root()
-    required = [
-        root,
-        root / "runtime",
-        root / "planning",
-        root / "adapters",
-        root / "assurance",
-    ]
+    tree_law_ok, tree_law_error = _tree_law_status()
+    required = [root] + [root / entry for entry in _required_entries()]
 
-    structure_ok = all(path.exists() for path in required)
+    structure_ok = all(path.exists() for path in required) and tree_law_ok
     ledger_dirs_ok, ledger_error = _ledger_dirs_status(config)
 
     return {
         "structure": structure_ok,
         "ledger_dirs": ledger_dirs_ok,
         "ledger_dirs_error": ledger_error,
+        "tree_law": tree_law_ok,
+        "tree_law_error": tree_law_error,
     }
 
 
