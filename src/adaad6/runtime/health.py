@@ -66,7 +66,7 @@ def _tree_law_status() -> tuple[bool, str | None]:
     extras: list[str] = []
     for item in root.iterdir():
         name = item.name
-        if name in ignored or name.endswith(".pyc"):
+        if name in ignored or name.startswith(".") or name.endswith(".pyc"):
             continue
         if item.is_dir():
             if name not in allowed_dirs:

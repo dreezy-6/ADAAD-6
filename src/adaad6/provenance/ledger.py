@@ -40,6 +40,9 @@ def _last_hash(path: Path) -> str | None:
 
 
 def append_event(cfg: AdaadConfig, event_type: str, payload: dict[str, Any], ts: str, actor: str) -> dict[str, Any]:
+    if cfg.ledger_readonly:
+        raise RuntimeError("LEDGER_READONLY")
+
     path = ensure_ledger(cfg)
     prev_hash = _last_hash(path)
     event_without_hash = {

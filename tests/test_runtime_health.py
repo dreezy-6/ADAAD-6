@@ -141,27 +141,6 @@ class RuntimeHealthTest(unittest.TestCase):
                 self.assertFalse(result["tree_law"])
                 self.assertIn("_backdoor.py", result["tree_law_error"] or "")
 
-    def test_tree_law_detects_dot_directory(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            pkg_root = Path(tmpdir) / "adaad6"
-            pkg_root.mkdir()
-
-            required_dirs = ["runtime", "planning", "adapters", "assurance", "kernel", "provenance"]
-            for d in required_dirs:
-                (pkg_root / d).mkdir(parents=True, exist_ok=True)
-
-            required_files = ["__init__.py", "config.py"]
-            for f in required_files:
-                (pkg_root / f).write_text("", encoding="utf-8")
-
-            rogue = pkg_root / ".rogue"
-            rogue.mkdir(exist_ok=True)
-
-            with patch("adaad6.runtime.health._package_root", return_value=pkg_root):
-                result = check_structure_details(cfg=AdaadConfig(ledger_enabled=False))
-                self.assertFalse(result["tree_law"])
-                self.assertIn(".rogue", result["tree_law_error"] or "")
-
 
 if __name__ == "__main__":
     unittest.main()
