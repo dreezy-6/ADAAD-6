@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from adaad6.config import AdaadConfig
 from adaad6.runtime.health import check_structure, check_structure_details
@@ -11,6 +12,7 @@ class RuntimeHealthTest(unittest.TestCase):
         result = check_structure_details(cfg=AdaadConfig(ledger_enabled=False))
 
         self.assertTrue(result["ledger_dirs"])
+        self.assertTrue(result["tree_law"])
         self.assertTrue(check_structure(cfg=AdaadConfig(ledger_enabled=False)))
 
     def test_ledger_dirs_missing_but_creatable(self) -> None:
@@ -22,6 +24,7 @@ class RuntimeHealthTest(unittest.TestCase):
 
             self.assertTrue(result["ledger_dirs"])
             self.assertIsNone(result["ledger_dirs_error"])
+            self.assertTrue(result["tree_law"])
             self.assertFalse(ledger_dir.exists())
 
     def test_ledger_dirs_fail_when_path_is_file(self) -> None:
@@ -34,6 +37,7 @@ class RuntimeHealthTest(unittest.TestCase):
 
             self.assertFalse(result["ledger_dirs"])
             self.assertIsNotNone(result["ledger_dirs_error"])
+            self.assertTrue(result["tree_law"])
 
     def test_ledger_file_path_points_to_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -47,6 +51,7 @@ class RuntimeHealthTest(unittest.TestCase):
 
             self.assertFalse(result["ledger_dirs"])
             self.assertIsNotNone(result["ledger_dirs_error"])
+            self.assertTrue(result["tree_law"])
 
     def test_ledger_file_parent_needs_creation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -57,6 +62,7 @@ class RuntimeHealthTest(unittest.TestCase):
 
             self.assertTrue(result["ledger_dirs"])
             self.assertIsNone(result["ledger_dirs_error"])
+            self.assertTrue(result["tree_law"])
 
     def test_ledger_file_parent_exists_as_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -70,6 +76,91 @@ class RuntimeHealthTest(unittest.TestCase):
 
             self.assertFalse(result["ledger_dirs"])
             self.assertIsNotNone(result["ledger_dirs_error"])
+            self.assertTrue(result["tree_law"])
+
+    def test_tree_law_detects_unexpected_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg_root = Path(tmpdir) / "adaad6"
+            pkg_root.mkdir()
+
+            required_dirs = ["runtime", "planning", "adapters", "assurance", "kernel", "provenance"]
+            for d in required_dirs:
+                (pkg_root / d).mkdir(parents=True, exist_ok=True)
+
+            required_files = ["__init__.py", "config.py"]
+            for f in required_files:
+                (pkg_root / f).write_text("", encoding="utf-8")
+
+            rogue = pkg_root / "rogue_node"
+            rogue.mkdir(exist_ok=True)
+
+            with patch("adaad6.runtime.health._package_root", return_value=pkg_root):
+                result = check_structure_details(cfg=AdaadConfig(ledger_enabled=False))
+                self.assertFalse(result["tree_law"])
+                self.assertIn("rogue_node", result["tree_law_error"] or "")
+
+    def test_tree_law_detects_rogue_root_py_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg_root = Path(tmpdir) / "adaad6"
+            pkg_root.mkdir()
+
+            required_dirs = ["runtime", "planning", "adapters", "assurance", "kernel", "provenance"]
+            for d in required_dirs:
+                (pkg_root / d).mkdir(parents=True, exist_ok=True)
+
+            required_files = ["__init__.py", "config.py"]
+            for f in required_files:
+                (pkg_root / f).write_text("", encoding="utf-8")
+
+            rogue = pkg_root / "backdoor.py"
+            rogue.write_text("# rogue", encoding="utf-8")
+
+            with patch("adaad6.runtime.health._package_root", return_value=pkg_root):
+                result = check_structure_details(cfg=AdaadConfig(ledger_enabled=False))
+                self.assertFalse(result["tree_law"])
+                self.assertIn("backdoor.py", result["tree_law_error"] or "")
+
+    def test_tree_law_detects_private_root_py_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg_root = Path(tmpdir) / "adaad6"
+            pkg_root.mkdir()
+
+            required_dirs = ["runtime", "planning", "adapters", "assurance", "kernel", "provenance"]
+            for d in required_dirs:
+                (pkg_root / d).mkdir(parents=True, exist_ok=True)
+
+            required_files = ["__init__.py", "config.py"]
+            for f in required_files:
+                (pkg_root / f).write_text("", encoding="utf-8")
+
+            rogue = pkg_root / "_backdoor.py"
+            rogue.write_text("# rogue", encoding="utf-8")
+
+            with patch("adaad6.runtime.health._package_root", return_value=pkg_root):
+                result = check_structure_details(cfg=AdaadConfig(ledger_enabled=False))
+                self.assertFalse(result["tree_law"])
+                self.assertIn("_backdoor.py", result["tree_law_error"] or "")
+
+    def test_tree_law_detects_dot_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg_root = Path(tmpdir) / "adaad6"
+            pkg_root.mkdir()
+
+            required_dirs = ["runtime", "planning", "adapters", "assurance", "kernel", "provenance"]
+            for d in required_dirs:
+                (pkg_root / d).mkdir(parents=True, exist_ok=True)
+
+            required_files = ["__init__.py", "config.py"]
+            for f in required_files:
+                (pkg_root / f).write_text("", encoding="utf-8")
+
+            rogue = pkg_root / ".rogue"
+            rogue.mkdir(exist_ok=True)
+
+            with patch("adaad6.runtime.health._package_root", return_value=pkg_root):
+                result = check_structure_details(cfg=AdaadConfig(ledger_enabled=False))
+                self.assertFalse(result["tree_law"])
+                self.assertIn(".rogue", result["tree_law_error"] or "")
 
 
 if __name__ == "__main__":
