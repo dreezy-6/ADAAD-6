@@ -11,6 +11,7 @@ class LedgerAppendOnlyTest(unittest.TestCase):
             cfg = AdaadConfig(ledger_enabled=True, ledger_dir=tmpdir, ledger_filename="events.jsonl")
 
             first = append_event(cfg, "alpha", {"value": 1}, "2024-01-01T00:00:00Z", "tester")
+            self.assertTrue(verify_chain(read_events(cfg)))
             second = append_event(cfg, "beta", {"value": 2}, "2024-01-01T00:01:00Z", "tester")
 
             ledger_file = ledger_path(cfg)

@@ -8,7 +8,7 @@ import sys
 from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import quote
 
-from adaad6.kernel.hashing import canonical_json, hash_object
+from adaad6.assurance.logging import canonical_json, compute_checksum
 from adaad6.config import AdaadConfig
 from adaad6.kernel.failures import (
     EVIDENCE_MISSING,
@@ -214,8 +214,8 @@ def _utc_now_iso_z() -> str:
 def _payload_with_content_hash(payload: dict[str, Any]) -> dict[str, Any]:
     base = dict(payload)
     base_without_hash = {k: v for k, v in base.items() if k != "content_hash"}
-    canonical_payload = json.loads(canonical_json(base_without_hash))
-    base["content_hash"] = hash_object(canonical_payload)
+    canonical_payload = canonical_json(base_without_hash)
+    base["content_hash"] = compute_checksum(canonical_payload)
     return base
 
 

@@ -15,8 +15,9 @@ def canonical_json(obj: Any) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"))
 
 
-def compute_checksum(payload: dict[str, Any]) -> str:
-    encoded = canonical_json(payload).encode("utf-8")
+def compute_checksum(payload: Any) -> str:
+    encoded_payload = payload if isinstance(payload, str) else canonical_json(payload)
+    encoded = encoded_payload.encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 

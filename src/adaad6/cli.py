@@ -74,6 +74,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ledger_sub = ledger_parser.add_subparsers(dest="ledger_command", required=True)
     tail_parser = ledger_sub.add_parser("tail", help="Tail ledger events")
     tail_parser.add_argument("--limit", type=int, default=None, help="Maximum number of events to read from the end")
+    ledger_sub.add_parser("verify", help="Verify ledger hashchain integrity")
 
     return parser
 
@@ -136,22 +137,30 @@ def main(argv: list[str] | None = None) -> int:
             _emit({"ok": result.ok, "output": result.output, "log": result.log})
             return 0 if result.ok else 1
 
-        if args.command == "ledger" and args.ledger_command == "tail":
-            limit = args.limit if args.limit is None or args.limit >= 0 else None
+        if args.command == "ledger":
+            limit = args.limit if hasattr(args, "limit") and (args.limit is None or args.limit >= 0) else None
             from adaad6.provenance.ledger import read_events
 
             if not getattr(cfg, "ledger_enabled", False):
                 _emit({"ok": False, "error": "ledger disabled"})
                 return 2
             try:
-                events = read_events(cfg, limit=limit)
+                events = read_events(cfg, limit=limit if args.ledger_command == "tail" else None)
             except FileNotFoundError:
                 _emit({"ok": False, "error": "ledger not initialized"})
                 return 2
-            _emit({"ok": True, "count": len(events)})
-            for event in events:
-                sys.stdout.write(_dump(event) + "\n")
-            return 0
+
+            if args.ledger_command == "tail":
+                _emit({"ok": True, "count": len(events)})
+                for event in events:
+                    sys.stdout.write(_dump(event) + "\n")
+                return 0
+            if args.ledger_command == "verify":
+                from adaad6.provenance.hashchain import verify_chain
+
+                valid = verify_chain(events)
+                _emit({"ok": valid, "valid": valid, "count": len(events)})
+                return 0 if valid else 1
 
         if args.command == "version":
             try:
