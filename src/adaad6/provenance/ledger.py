@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -11,7 +12,15 @@ from adaad6.provenance.hashchain import compute_event_hash
 
 
 def ledger_path(cfg: AdaadConfig) -> Path:
-    return Path(cfg.ledger_dir) / cfg.ledger_filename
+    home = Path(cfg.home).expanduser().resolve()
+    ledger_dir = Path(cfg.ledger_dir)
+    if not ledger_dir.is_absolute():
+        ledger_dir = home / ledger_dir
+    try:
+        ledger_dir = ledger_dir.resolve(strict=False)
+    except TypeError:
+        ledger_dir = Path(os.path.abspath(str(ledger_dir)))
+    return ledger_dir / cfg.ledger_filename
 
 
 def ensure_ledger(cfg: AdaadConfig) -> Path:

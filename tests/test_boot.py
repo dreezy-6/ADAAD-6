@@ -34,7 +34,7 @@ class BootSequenceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             ledger_base = Path(tmpdir) / ".adaad" / "ledger"
             ledger_base.mkdir(parents=True, exist_ok=True)
-            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(ledger_base), ledger_filename="events.jsonl", home_dir=tmpdir)
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(ledger_base), ledger_filename="events.jsonl", home=tmpdir)
 
             result = boot_sequence(cfg=cfg)
 
@@ -54,7 +54,7 @@ class BootSequenceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             ledger_file_dir = Path(tmpdir) / ".adaad" / "ledger" / "events.jsonl"
             ledger_file_dir.mkdir(parents=True, exist_ok=True)
-            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(ledger_file_dir.parent), ledger_filename="events.jsonl", home_dir=tmpdir)
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(ledger_file_dir.parent), ledger_filename="events.jsonl", home=tmpdir)
 
             result = boot_sequence(cfg=cfg)
 

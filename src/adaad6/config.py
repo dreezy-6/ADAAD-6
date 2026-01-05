@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Mapping
+from typing import Callable, Mapping
 
 ENV_PREFIX = "ADAAD6_"
 CONFIG_SCHEMA_VERSION = "1"
@@ -34,6 +34,8 @@ class RunMode(str, Enum):
 class AdaadConfig:
     version: str = "0.0.0"
 
+    home: str = "."
+
     mutation_policy: MutationPolicy = MutationPolicy.LOCKED
     # optional readiness gate signature for EVOLUTIONARY
     readiness_gate_sig: str | None = None
@@ -43,7 +45,6 @@ class AdaadConfig:
 
     mode: RunMode = RunMode.DEV
     config_schema_version: str = CONFIG_SCHEMA_VERSION
-    home_dir: str = "."
 
     resource_tier: ResourceTier = ResourceTier.MOBILE
     resource_scaling: float = 1.0  # derived, deterministic
@@ -80,7 +81,7 @@ class AdaadConfig:
         if (self.config_schema_version or "").strip() != CONFIG_SCHEMA_VERSION:
             raise ValueError("config_schema_version mismatch")
 
-        home = Path(self.home_dir).expanduser().resolve()
+        home = Path(self.home).expanduser().resolve()
 
         # hard caps
         if not (1 <= self.planner_max_steps <= 10_000):
@@ -129,7 +130,9 @@ def _get_env(env: Mapping[str, str], key: str) -> str | None:
 
 def _require_sig_alg(env: Mapping[str, str]) -> bool:
     alg = (_get_env(env, "CONFIG_SIG_ALG") or "").strip()
-    return bool(alg) and alg.upper() == SIG_ALG
+    if not alg:
+        return False
+    return alg.upper() == SIG_ALG
 
 
 def _coerce_bool(value: str) -> bool:
@@ -166,16 +169,8 @@ def _coerce_enum(value: str, enum_cls, field: str):
         raise ValueError(f"Invalid {field}: {value}. Allowed: {allowed}") from exc
 
 
-def _get_sig_key(env: Mapping[str, str], mode: RunMode) -> str | None:
-    # DEV: allow env key for local testing.
-    # PROD: must be replaced with secure store integration. For now, returns None.
-    key = _get_env(env, "CONFIG_SIG_KEY")
-    if mode == RunMode.PROD:
-        # reject env-provided key in production
-        if key:
-            return None
-        return None
-    return key
+def _dev_env_key_provider(env: Mapping[str, str]) -> str | None:
+    return _get_env(env, "CONFIG_SIG_KEY")
 
 
 def _canonical_env_payload(env: Mapping[str, str]) -> bytes:
@@ -195,18 +190,25 @@ def _canonical_env_payload(env: Mapping[str, str]) -> bytes:
     return "".join([f"{k}={v}\n" for k, v in items]).encode("utf-8")
 
 
-def _verify_env_signature(env: Mapping[str, str]) -> bool:
-    if (_get_env(env, "CONFIG_SCHEMA_VERSION") or "").strip() != CONFIG_SCHEMA_VERSION:
-        return False
+def _verify_env_signature(
+    env: Mapping[str, str],
+    *,
+    mode: RunMode,
+    key_provider: Callable[[Mapping[str, str]], str | None],
+) -> bool:
     if not _require_sig_alg(env):
+        return False
+    if (_get_env(env, "CONFIG_SCHEMA_VERSION") or "").strip() != CONFIG_SCHEMA_VERSION:
         return False
 
     sig_hex = _get_env(env, "CONFIG_SIG")
     if not sig_hex:
         return False
 
-    mode = _coerce_enum(_get_env(env, "MODE") or RunMode.DEV.value, RunMode, "mode")
-    key = _get_sig_key(env, mode)
+    if mode == RunMode.PROD and _get_env(env, "CONFIG_SIG_KEY"):
+        return False
+
+    key = key_provider(env)
     if not key:
         return False
 
@@ -231,18 +233,21 @@ def _resource_scaling_for_tier(tier: ResourceTier) -> float:
     return 1.0  # server
 
 
-def _enforce_ledger_dir_sandbox(ledger_dir: str, home: Path) -> None:
-    base = (home / ".adaad").resolve()
+def _enforce_ledger_dir_sandbox(ledger_dir: str, *, home: Path) -> None:
+    try:
+        base = (home / ".adaad").resolve(strict=False)
+    except TypeError:
+        # python < 3.9 fallback
+        base = Path(os.path.abspath(str(home / ".adaad")))
     target = Path(ledger_dir)
+    if not target.is_absolute():
+        target = home / target
 
     # resolve without requiring existence
     try:
         target_resolved = target.resolve(strict=False)
     except TypeError:
         target_resolved = Path(os.path.abspath(str(target)))
-
-    if not target_resolved.is_absolute():
-        target_resolved = (home / target_resolved).resolve()
 
     if base not in target_resolved.parents and target_resolved != base:
         raise ValueError("ledger_dir must resolve under .adaad/ (sandbox violation)")
@@ -259,28 +264,50 @@ def _enforce_ledger_dir_sandbox(ledger_dir: str, home: Path) -> None:
             raise ValueError("ledger_dir must not traverse symlinks (sandbox violation)")
 
 
-def load_config(env: Mapping[str, str] | None = None) -> AdaadConfig:
+def load_config(
+    env: Mapping[str, str] | None = None,
+    *,
+    key_provider: Callable[[Mapping[str, str]], str | None] = _dev_env_key_provider,
+) -> AdaadConfig:
     source: Mapping[str, str] = env or os.environ
 
     mode = _coerce_enum(_get_env(source, "MODE") or RunMode.DEV.value, RunMode, "mode")
-    cfg_schema = _get_env(source, "CONFIG_SCHEMA_VERSION") or CONFIG_SCHEMA_VERSION
+    cfg_schema_raw = (_get_env(source, "CONFIG_SCHEMA_VERSION") or "").strip()
+    schema_mismatch = bool(cfg_schema_raw and cfg_schema_raw != CONFIG_SCHEMA_VERSION)
+    cfg_schema = CONFIG_SCHEMA_VERSION
     home = _resolve_home(source)
+
+    sig_required_raw = _get_env(source, "CONFIG_SIG_REQUIRED")
+    sig_required = _coerce_bool(sig_required_raw) if sig_required_raw else True
+
+    # prod safety: default provider is dev-only. force explicit secure provider in prod.
+    if mode == RunMode.PROD and key_provider is _dev_env_key_provider:
+        sig_required = True
 
     emergency_halt_raw = _get_env(source, "EMERGENCY_HALT")
     emergency_halt = _coerce_bool(emergency_halt_raw) if emergency_halt_raw else False
 
     # signature gate
-    sig_required_raw = _get_env(source, "CONFIG_SIG_REQUIRED")
-    sig_required = _coerce_bool(sig_required_raw) if sig_required_raw else True
-    sig_ok = _verify_env_signature(source) if sig_required else True
+    sig_ok = _verify_env_signature(source, mode=mode, key_provider=key_provider) if sig_required else True
+    must_freeze = schema_mismatch or (sig_required and not sig_ok)
 
     # if signature fails, freeze
-    if sig_required and not sig_ok:
+    if must_freeze:
+        if schema_mismatch:
+            reason = "CONFIG_SCHEMA_VERSION_MISMATCH"
+        elif mode == RunMode.PROD and key_provider is _dev_env_key_provider:
+            reason = "CONFIG_SIG_KEY_PROVIDER_REQUIRED"
+        else:
+            try_key = key_provider(source)
+            if not try_key:
+                reason = "CONFIG_SIG_KEY_UNAVAILABLE"
+            else:
+                reason = "CONFIG_SIG_INVALID"
         cfg = AdaadConfig(
             version=_get_env(source, "VERSION") or AdaadConfig.version,
             mode=mode,
-            config_schema_version=cfg_schema,
-            home_dir=str(home),
+            config_schema_version=CONFIG_SCHEMA_VERSION,
+            home=str(home),
             mutation_policy=MutationPolicy.LOCKED,
             planner_max_steps=1,
             planner_max_seconds=0.01,
@@ -293,7 +320,7 @@ def load_config(env: Mapping[str, str] | None = None) -> AdaadConfig:
             ledger_readonly=True,
             emergency_halt=True,
             agents_enabled=False,
-            freeze_reason="CONFIG_SIG_INVALID",
+            freeze_reason=reason,
             resource_tier=_coerce_enum(_get_env(source, "RESOURCE_TIER") or "mobile", ResourceTier, "resource_tier"),
             resource_scaling=_resource_scaling_for_tier(
                 _coerce_enum(_get_env(source, "RESOURCE_TIER") or "mobile", ResourceTier, "resource_tier")
@@ -355,7 +382,7 @@ def load_config(env: Mapping[str, str] | None = None) -> AdaadConfig:
         version=version,
         mode=mode,
         config_schema_version=cfg_schema,
-        home_dir=str(home),
+        home=str(home),
         mutation_policy=mutation_policy,
         readiness_gate_sig=readiness_gate_sig,
         planner_max_steps=planner_max_steps,

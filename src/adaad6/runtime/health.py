@@ -105,7 +105,14 @@ def _ledger_dirs_status(cfg: AdaadConfig) -> tuple[bool, str | None]:
     if not cfg.ledger_enabled:
         return True, None
 
+    home = Path(getattr(cfg, "home", ".")).expanduser().resolve()
     ledger_dir = Path(cfg.ledger_dir)
+    if not ledger_dir.is_absolute():
+        ledger_dir = home / ledger_dir
+    try:
+        ledger_dir = ledger_dir.resolve(strict=False)
+    except TypeError:
+        ledger_dir = Path(os.path.abspath(str(ledger_dir)))
     ledger_file_path = ledger_dir / cfg.ledger_filename
     ledger_file_parent = ledger_file_path.parent
 
