@@ -14,6 +14,7 @@ class HashchainIntegrityTest(unittest.TestCase):
             append_event(cfg, "beta", {"value": 2}, "2024-01-01T00:01:00Z", "tester")
 
             events = read_events(cfg)
+            self.assertTrue(verify_chain(events))
             tampered = copy.deepcopy(events)
             tampered[1]["payload"]["value"] = 999
 
@@ -26,6 +27,7 @@ class HashchainIntegrityTest(unittest.TestCase):
             append_event(cfg, "beta", {"value": 2}, "2024-01-01T00:01:00Z", "tester")
 
             events = read_events(cfg)
+            self.assertTrue(verify_chain(events))
             broken = [events[1], events[0]]
 
             self.assertFalse(verify_chain(broken))
