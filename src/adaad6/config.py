@@ -35,6 +35,7 @@ class AdaadConfig:
     version: str = "0.0.0"
 
     home: str = "."
+    actions_dir: str = ".adaad/actions"
 
     mutation_policy: MutationPolicy = MutationPolicy.LOCKED
     # optional readiness gate signature for EVOLUTIONARY
@@ -102,6 +103,8 @@ class AdaadConfig:
         if self.ledger_enabled and not (self.ledger_filename or "").strip():
             raise ValueError("ledger_filename must be set when ledger logging is enabled")
 
+        _enforce_actions_dir_sandbox(self.actions_dir, home=home)
+
         if self.ledger_enabled:
             # filename is a relative path only
             ledger_file_raw = (self.ledger_filename or "").strip()
@@ -130,7 +133,7 @@ class AdaadConfig:
 
 
 def _get_env(env: Mapping[str, str], key: str) -> str | None:
-    return env.get(f"{ENV_PREFIX}{key}")
+    return env.get(f"{ENV_PREFIX}{key}") or env.get(key)
 
 
 def _require_sig_alg(env: Mapping[str, str]) -> bool:
@@ -299,6 +302,39 @@ def _enforce_log_path_sandbox(log_path: str, *, home: Path) -> None:
             raise ValueError("log_path must not traverse symlinks")
 
 
+def _enforce_actions_dir_sandbox(actions_dir: str, *, home: Path) -> None:
+    raw = (actions_dir or "").strip()
+    if not raw:
+        raise ValueError("actions_dir must be set")
+
+    posix = PurePosixPath(raw)
+    win = PureWindowsPath(raw)
+
+    if posix.is_absolute() or win.is_absolute() or win.drive:
+        raise ValueError("actions_dir must be a relative path")
+    if raw.startswith("~"):
+        raise ValueError("actions_dir must not start with ~")
+    if ".." in posix.parts or ".." in win.parts:
+        raise ValueError("actions_dir must not contain parent directory traversal")
+
+    target = home / raw
+    try:
+        resolved = target.resolve(strict=False)
+    except TypeError:
+        resolved = Path(os.path.abspath(str(target)))
+
+    try:
+        rel = resolved.relative_to(home)
+    except Exception as exc:
+        raise ValueError("actions_dir must resolve under home/") from exc
+
+    probe = home
+    for part in rel.parts:
+        probe = probe / part
+        if probe.exists() and probe.is_symlink():
+            raise ValueError("actions_dir must not traverse symlinks")
+
+
 def load_config(
     env: Mapping[str, str] | None = None,
     *,
@@ -311,7 +347,8 @@ def load_config(
     schema_mismatch = bool(cfg_schema_raw and cfg_schema_raw != CONFIG_SCHEMA_VERSION)
     cfg_schema = CONFIG_SCHEMA_VERSION
     home = _resolve_home(source)
-    log_path = _get_env(source, "ADAAD6_LOG_PATH") or _get_env(source, "LOG_PATH") or AdaadConfig.log_path
+    log_path = _get_env(source, "LOG_PATH") or AdaadConfig.log_path
+    actions_dir = _get_env(source, "ACTIONS_DIR") or AdaadConfig.actions_dir
 
     sig_required_raw = _get_env(source, "CONFIG_SIG_REQUIRED")
     sig_required = _coerce_bool(sig_required_raw) if sig_required_raw else True
@@ -349,6 +386,7 @@ def load_config(
             planner_max_seconds=0.01,
             log_schema_version=_get_env(source, "LOG_SCHEMA_VERSION") or AdaadConfig.log_schema_version,
             log_path=log_path,
+            actions_dir=actions_dir,
             ledger_enabled=True,
             ledger_dir=_get_env(source, "LEDGER_DIR") or AdaadConfig.ledger_dir,
             ledger_filename=_get_env(source, "LEDGER_FILE") or _get_env(source, "LEDGER_FILENAME") or AdaadConfig.ledger_filename,
@@ -427,6 +465,7 @@ def load_config(
         resource_tier=tier,
         resource_scaling=scaling,
         log_schema_version=log_schema_version,
+        actions_dir=actions_dir,
         log_path=log_path,
         ledger_enabled=ledger_enabled or emergency_halt,
         ledger_dir=ledger_dir,
