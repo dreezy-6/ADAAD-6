@@ -11,10 +11,9 @@ from urllib.parse import quote
 from adaad6.kernel.hashing import canonical_json
 from adaad6.config import AdaadConfig
 from adaad6.kernel.failures import (
-    DETERMINISM_BREACH,
     EVIDENCE_MISSING,
-    INTEGRITY_VIOLATION,
     KernelCrash,
+    map_exception,
 )
 from adaad6.kernel.context import KernelContext
 from adaad6.planning.registry import ActionModule
@@ -32,6 +31,7 @@ class StageLog:
     output: Any | None = None
     code: str | None = None
     detail: str | None = None
+    debug_detail: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {"stage": self.stage, "status": self.status}
@@ -53,6 +53,7 @@ class StepLog:
     output: Any | None = None
     code: str | None = None
     detail: str | None = None
+    debug_detail: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -101,32 +102,12 @@ class ExecutionLog:
         return data
 
 
-def _exc_detail(exc: Exception) -> str:
-    detail = str(exc)
-    return detail if detail.strip() else exc.__class__.__name__
-
-
 def _json_safe_output(output: Any) -> Any:
     try:
         json.dumps(output)
         return output
     except Exception:
         return {"__type__": type(output).__name__, "__repr__": repr(output)}
-
-
-def _normalize_crash(exc: Exception) -> KernelCrash:
-    if isinstance(exc, KernelCrash):
-        return exc
-    detail = _exc_detail(exc)
-    if isinstance(exc, (ValueError, TypeError)):
-        return KernelCrash(INTEGRITY_VIOLATION, detail)
-    if isinstance(exc, (KeyError, FileNotFoundError)):
-        return KernelCrash(EVIDENCE_MISSING, detail)
-    if isinstance(exc, PermissionError):
-        return KernelCrash(INTEGRITY_VIOLATION, detail)
-    if isinstance(exc, TimeoutError):
-        return KernelCrash(DETERMINISM_BREACH, detail)
-    return KernelCrash(DETERMINISM_BREACH, detail)
 
 
 def _lookup_action(name: str, actions: Mapping[str, ActionModule]) -> ActionModule:
@@ -136,20 +117,35 @@ def _lookup_action(name: str, actions: Mapping[str, ActionModule]) -> ActionModu
     return action
 
 
-def _stage(stage: str, status: str, *, output: Any | None = None, crash: KernelCrash | None = None) -> StageLog:
+def _stage(
+    stage: str,
+    status: str,
+    *,
+    output: Any | None = None,
+    crash: KernelCrash | None = None,
+    capture_debug: bool = False,
+) -> StageLog:
     if crash:
-        return StageLog(stage=stage, status=status, code=crash.code, detail=crash.detail)
+        return StageLog(
+            stage=stage,
+            status=status,
+            code=crash.code,
+            detail=crash.detail,
+            debug_detail=crash.debug_detail if capture_debug else None,
+        )
     return StageLog(stage=stage, status=status, output=_json_safe_output(output) if output is not None else None)
 
 
-def _execute_step(spec: ActionSpec, *, module: ActionModule, cfg: AdaadConfig) -> StepLog:
+def _execute_step(
+    spec: ActionSpec, *, module: ActionModule, cfg: AdaadConfig, capture_debug: bool = False
+) -> StepLog:
     stages: list[StageLog] = []
     try:
         validated = module.validate(spec.params, cfg)
         stages.append(_stage("precheck", "ok", output=validated))
     except Exception as exc:  # pragma: no cover - exercised in executor
-        crash = _normalize_crash(exc)
-        stages.append(_stage("precheck", "crash", crash=crash))
+        crash = map_exception(exc, include_debug=capture_debug)
+        stages.append(_stage("precheck", "crash", crash=crash, capture_debug=capture_debug))
         return StepLog(
             id=spec.id,
             action=spec.action,
@@ -157,14 +153,15 @@ def _execute_step(spec: ActionSpec, *, module: ActionModule, cfg: AdaadConfig) -
             stages=tuple(stages),
             code=crash.code,
             detail=crash.detail,
+            debug_detail=crash.debug_detail if capture_debug else None,
         )
 
     try:
         result = module.run(validated)
         stages.append(_stage("execute", "ok", output=result))
     except Exception as exc:  # pragma: no cover - exercised in executor
-        crash = _normalize_crash(exc)
-        stages.append(_stage("execute", "crash", crash=crash))
+        crash = map_exception(exc, include_debug=capture_debug)
+        stages.append(_stage("execute", "crash", crash=crash, capture_debug=capture_debug))
         return StepLog(
             id=spec.id,
             action=spec.action,
@@ -172,14 +169,15 @@ def _execute_step(spec: ActionSpec, *, module: ActionModule, cfg: AdaadConfig) -
             stages=tuple(stages),
             code=crash.code,
             detail=crash.detail,
+            debug_detail=crash.debug_detail if capture_debug else None,
         )
 
     try:
         checked = module.postcheck(result, cfg)
         stages.append(_stage("postcheck", "ok", output=checked))
     except Exception as exc:  # pragma: no cover - exercised in executor
-        crash = _normalize_crash(exc)
-        stages.append(_stage("postcheck", "crash", crash=crash))
+        crash = map_exception(exc, include_debug=capture_debug)
+        stages.append(_stage("postcheck", "crash", crash=crash, capture_debug=capture_debug))
         return StepLog(
             id=spec.id,
             action=spec.action,
@@ -187,6 +185,7 @@ def _execute_step(spec: ActionSpec, *, module: ActionModule, cfg: AdaadConfig) -
             stages=tuple(stages),
             code=crash.code,
             detail=crash.detail,
+            debug_detail=crash.debug_detail if capture_debug else None,
         )
 
     return StepLog(
@@ -219,6 +218,7 @@ def _run_plan(
     cfg: AdaadConfig,
     context: KernelContext,
     on_step: Callable[[StepLog, KernelContext], None] | None = None,
+    capture_debug: bool = False,
 ) -> ExecutionLog:
     steps: list[StepLog] = []
     crash_code: str | None = None
@@ -244,18 +244,20 @@ def _run_plan(
         try:
             module = _lookup_action(spec.action, actions)
         except KernelCrash as crash:
-            stages = (_stage("precheck", "crash", crash=crash),)
+            mapped = map_exception(crash, include_debug=capture_debug)
+            stages = (_stage("precheck", "crash", crash=mapped, capture_debug=capture_debug),)
             step = StepLog(
                 id=spec.id,
                 action=spec.action,
                 status="crash",
                 stages=stages,
-                code=crash.code,
-                detail=crash.detail,
+                code=mapped.code,
+                detail=mapped.detail,
+                debug_detail=mapped.debug_detail if capture_debug else None,
             )
             steps.append(step)
-            crash_code = crash.code
-            crash_detail = crash.detail
+            crash_code = mapped.code
+            crash_detail = mapped.detail
             crash_stage = "precheck"
             crash_step = spec.id
             halted = True
@@ -263,7 +265,7 @@ def _run_plan(
                 on_step(step, context)
             continue
 
-        step = _execute_step(spec, module=module, cfg=cfg)
+        step = _execute_step(spec, module=module, cfg=cfg, capture_debug=capture_debug)
         if step.status == "ok" and step.output is not None:
             context = context.register_artifact(f"{spec.id}:{spec.action}:result", _artifact_uri(step.output))
         steps.append(step)
@@ -296,10 +298,11 @@ def execute_plan(
     actions: Mapping[str, ActionModule],
     cfg: AdaadConfig,
     ctx: KernelContext | None = None,
+    capture_debug: bool = False,
 ) -> ExecutionLog:
     cfg.validate()
     context = ctx or KernelContext.build(cfg)
-    return _run_plan(plan, actions=actions, cfg=cfg, context=context)
+    return _run_plan(plan, actions=actions, cfg=cfg, context=context, capture_debug=capture_debug)
 
 
 def execute_and_record(
@@ -309,11 +312,12 @@ def execute_and_record(
     cfg: AdaadConfig,
     ctx: KernelContext | None = None,
     actor: str = "executor",
+    capture_debug: bool = False,
 ) -> ExecutionLog:
     cfg.validate()
     context = ctx or KernelContext.build(cfg)
     if not cfg.ledger_enabled:
-        return _run_plan(plan, actions=actions, cfg=cfg, context=context)
+        return _run_plan(plan, actions=actions, cfg=cfg, context=context, capture_debug=capture_debug)
 
     log: ExecutionLog | None = None
     start_payload = {"run_id": context.run_id, "config_hash": context.config.hash}
@@ -329,7 +333,7 @@ def execute_and_record(
                 actor,
             )
 
-        log = _run_plan(plan, actions=actions, cfg=cfg, context=context, on_step=_on_step)
+        log = _run_plan(plan, actions=actions, cfg=cfg, context=context, on_step=_on_step, capture_debug=capture_debug)
         return log
     finally:
         end_context = log.context if log else context

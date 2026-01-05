@@ -265,6 +265,23 @@ class ExecutorTest(unittest.TestCase):
         self.assertEqual("execution_run_end", events[2]["type"])
         self.assertEqual(log.context.run_id, events[0]["payload"]["run_id"])
 
+    def test_debug_detail_is_hidden_from_serialized_output(self) -> None:
+        def validate(params, cfg):
+            raise RuntimeError("boom")
+
+        actions = {"demo": _action_module("demo", validate, lambda _: None, lambda r, c: r)}
+        plan = [_spec("demo")]
+
+        log = execute_plan(plan, actions=actions, cfg=self.cfg, capture_debug=True)
+
+        self.assertFalse(log.ok)
+        stage = log.steps[0].stages[0]
+        self.assertIsNotNone(stage.debug_detail)
+        self.assertIn("RuntimeError: boom", stage.debug_detail)
+        serialized_stage = log.steps[0].to_dict()["stages"][0]
+        self.assertNotIn("debug_detail", serialized_stage)
+        self.assertNotIn("Traceback", serialized_stage.get("detail", ""))
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
