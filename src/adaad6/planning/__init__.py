@@ -1,3 +1,3 @@
 """Planning components."""
 
-__all__ = ["planner"]
+__all__ = ["planner", "templates"]
