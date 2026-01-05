@@ -15,6 +15,13 @@ def _dump(obj: Any) -> str:
 
 def _emit(obj: Any) -> None:
     sys.stdout.write(_dump(obj) + "\n")
+    sys.stdout.flush()
+
+
+def _emit_stderr(text: str) -> None:
+    # Human output should not break machine pipelines.
+    sys.stderr.write(text.rstrip("\n") + "\n")
+    sys.stderr.flush()
 
 
 def _parse_json_object(raw: str) -> dict[str, Any]:
@@ -37,6 +44,29 @@ def _safe_cli_log(cfg: Any, *, action: str, outcome: str, details: dict[str, Any
         pass
 
 
+def _doctor_human_summary(report: dict[str, Any]) -> str:
+    run_id = report.get("run_id") or "unknown"
+    status = "PASS" if report.get("ok") else "FAIL"
+    lines = [f"Doctor report [{run_id}]: {status}"]
+    summary = report.get("checks_summary") or {}
+    if not isinstance(summary, dict):
+        lines.append("- checks_summary: INVALID")
+        return "\n".join(lines)
+    for name in sorted(summary):
+        check = summary.get(name)
+        if not isinstance(check, dict):
+            lines.append(f"- {name}: INVALID")
+            continue
+        if check.get("skipped"):
+            check_status = "SKIPPED"
+        elif check.get("ok"):
+            check_status = "PASS"
+        else:
+            check_status = "FAIL"
+        lines.append(f"- {name}: {check_status}")
+    return "\n".join(lines)
+
+
 class _EchoAdapter:
     name = "cli_echo"
 
@@ -53,13 +83,48 @@ class _EchoAdapter:
         return _Wrapped().run(intent=intent, inputs=inputs, actor=actor, cfg=cfg)
 
 
+def _add_doctor_run_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Deprecated. Same as --output both.",
+    )
+    parser.add_argument(
+        "--output",
+        choices=("json", "text", "both"),
+        default="json",
+        help="Output mode: json emits machine output to stdout; text emits human output to stderr; both emits both.",
+    )
+    parser.add_argument(
+        "--no-template",
+        action="store_true",
+        help="Do not include the planning template in machine output",
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="adaad6", description="ADAAD-6 deterministic CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    doctor_common = argparse.ArgumentParser(add_help=False)
+    doctor_common.add_argument(
+        "--report-path",
+        default="doctor_report.txt",
+        help="Path to use in the generated report template destination",
+    )
+
     sub.add_parser("boot", help="Run boot sequence checks")
     sub.add_parser("health", help="Run structural health checks")
-    sub.add_parser("doctor", help="Perform combined diagnostics")
+    doctor_parser = sub.add_parser("doctor", help="Doctor utilities", parents=[doctor_common])
+    _add_doctor_run_args(doctor_parser)
+    doctor_sub = doctor_parser.add_subparsers(dest="doctor_command", required=False)
+
+    doctor_run = doctor_sub.add_parser("run", help="Perform combined diagnostics", parents=[doctor_common])
+    _add_doctor_run_args(doctor_run)
+
+    doctor_tpl = doctor_sub.add_parser(
+        "template", help="Emit the doctor planning template JSON without running doctor", parents=[doctor_common]
+    )
     sub.add_parser("version", help="Show ADAAD-6 version information")
 
     plan_parser = sub.add_parser("plan", help="Generate a plan for a goal")
@@ -109,11 +174,55 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if ok else 1
 
         if args.command == "doctor":
+            # Backward-compatible default to run when no subcommand is provided.
+            doctor_cmd = getattr(args, "doctor_command", None) or "run"
+
+            if doctor_cmd == "template":
+                if getattr(args, "report", False) or getattr(args, "no_template", False) or getattr(args, "output", "json") != "json":
+                    parser.error("doctor template does not accept --output/--report/--no-template")
+                from adaad6.planning.templates import compose_doctor_report_template
+
+                template = compose_doctor_report_template(destination=args.report_path).to_dict()
+                payload = {"ok": True, "template": template}
+                _safe_cli_log(cfg, action="doctor_template", outcome="ok", details={"report": payload})
+                _emit(payload)
+                return 0
+            if doctor_cmd != "run":
+                parser.error("unknown doctor subcommand")
+
             from adaad6.assurance import run_doctor
 
             report = run_doctor(cfg=cfg)
-            _safe_cli_log(cfg, action="doctor", outcome="ok" if report.get("ok") else "error", details={"report": report})
-            _emit(report)
+            outcome = "ok" if report.get("ok") else "error"
+
+            output_mode = getattr(args, "output", "json")
+            if getattr(args, "report", False):
+                output_mode = "both"
+
+            want_json = output_mode in {"json", "both"}
+            want_human = output_mode in {"text", "both"}
+
+            human = _doctor_human_summary(report) if want_human else ""
+
+            template = None
+            if want_json and not getattr(args, "no_template", False):
+                from adaad6.planning.templates import compose_doctor_report_template
+
+                template = compose_doctor_report_template(destination=args.report_path).to_dict()
+
+            machine_payload: dict[str, Any] = {"ok": bool(report.get("ok")), "report": report}
+            if template is not None:
+                machine_payload["template"] = template
+            if output_mode == "both":
+                machine_payload["human_readable"] = human
+
+            _safe_cli_log(cfg, action="doctor", outcome=outcome, details={"report": machine_payload})
+
+            if want_json:
+                _emit(machine_payload)
+            if want_human:
+                _emit_stderr(human)
+
             return 0 if report.get("ok") else 1
 
         if args.command == "plan":
