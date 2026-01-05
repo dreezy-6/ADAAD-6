@@ -1,6 +1,6 @@
 import unittest
 
-from adaad6.planning.templates import compose_diff_report_template, compose_doctor_report_template
+from adaad6.planning.templates import compose_diff_report_template, compose_doctor_report_template, compose_scaffold_template
 
 
 class PlanningTemplatesTest(unittest.TestCase):
@@ -50,6 +50,38 @@ class PlanningTemplatesTest(unittest.TestCase):
         self.assertEqual(["changelog_ready"], write["preconditions"])
         self.assertEqual(["report_written"], write["effects"])
         self.assertEqual("changes.md", write["params"]["destination"])
+
+    def test_compose_scaffold_template_includes_mobile_fallback_note(self) -> None:
+        plan = compose_scaffold_template(destination="scaffold.md").to_dict()
+
+        self.assertEqual("scaffold_plan", plan["goal"])
+        self.assertEqual(
+            {
+                "template": "scaffold",
+                "destination": "scaffold.md",
+                "tier_fallback": "mobile tier skips scaffold generation and verification; summary notes limitations",
+                "actions": "template selection, scaffold generation, verification, ledger record",
+            },
+            plan["meta"],
+        )
+        self.assertEqual(
+            ["select_template", "generate_scaffold", "run_tests", "record_ledger", "summarize_results", "write_report"],
+            [step["action"] for step in plan["steps"]],
+        )
+        select, generate, verify, ledger, summarize, write = plan["steps"]
+        self.assertEqual([], select["preconditions"])
+        self.assertEqual(["template_selected"], select["effects"])
+        self.assertEqual(["template_selected"], generate["preconditions"])
+        self.assertEqual(["scaffold_ready"], generate["effects"])
+        self.assertEqual(["scaffold_ready"], verify["preconditions"])
+        self.assertEqual(["verification_complete"], verify["effects"])
+        self.assertEqual(["verification_complete"], ledger["preconditions"])
+        self.assertEqual(["ledger_step_complete"], ledger["effects"])
+        self.assertEqual(["ledger_step_complete"], summarize["preconditions"])
+        self.assertEqual(["summary_ready"], summarize["effects"])
+        self.assertEqual(["summary_ready"], write["preconditions"])
+        self.assertEqual(["report_written"], write["effects"])
+        self.assertEqual("scaffold.md", write["params"]["destination"])
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -47,6 +47,23 @@ class CliTemplatesTest(unittest.TestCase):
         self.assertEqual("origin/main", template["meta"]["base_ref"])
         self.assertEqual("diff.md", template["meta"]["destination"])
 
+    def test_scaffold_template_via_template_command(self) -> None:
+        fake_config = DummyConfig()
+        with patch("adaad6.config.load_config", return_value=fake_config):
+            from adaad6.cli import main
+
+            out = StringIO()
+            with redirect_stdout(out):
+                exit_code = main(["template", "scaffold", "--destination", "scaffold.md"])
+
+        self.assertEqual(0, exit_code)
+        payload = json.loads(out.getvalue().splitlines()[0])
+        self.assertTrue(payload["ok"])
+        template = payload["template"]
+        self.assertEqual("scaffold_plan", template["goal"])
+        self.assertEqual("scaffold.md", template["meta"]["destination"])
+        self.assertEqual(["ledger_step_complete"], template["steps"][3]["effects"])
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

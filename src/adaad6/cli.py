@@ -133,7 +133,7 @@ def _build_parser() -> argparse.ArgumentParser:
     template_parser = sub.add_parser("template", help="Emit a planning template JSON")
     template_parser.add_argument(
         "name",
-        choices=("doctor_report", "diff_report"),
+        choices=("doctor_report", "diff_report", "scaffold"),
         help="Template name to render",
     )
     template_parser.add_argument(
@@ -256,13 +256,17 @@ def main(argv: list[str] | None = None) -> int:
                 from adaad6.planning.templates import compose_doctor_report_template
 
                 template = compose_doctor_report_template(destination=destination or "doctor_report.txt").to_dict()
-            else:
+            elif args.name == "diff_report":
                 from adaad6.planning.templates import compose_diff_report_template
 
                 template = compose_diff_report_template(
                     base_ref=getattr(args, "base_ref", "HEAD"),
                     destination=destination or "changelog.md",
                 ).to_dict()
+            else:
+                from adaad6.planning.templates import compose_scaffold_template
+
+                template = compose_scaffold_template(destination=destination or "scaffold_report.txt").to_dict()
             _safe_cli_log(cfg, action="template", outcome="ok", details={"name": args.name, "template": template})
             _emit({"ok": True, "template": template})
             return 0
