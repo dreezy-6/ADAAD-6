@@ -1,174 +1,322 @@
-# ADAAD-6
 
-Deterministic planning core for auditable, resource-bound systems.
+ADAAD-6
 
-ADAAD-6 converts a goal into a predictable, validated sequence of actions under strict limits. It is intentionally narrow in scope, fully inspectable, and safe by default.
+Autonomous Device-Anchored Adaptive Development
+Governed, deterministic, repo-first autonomous planning engine
 
-> ADAAD-6 is not an autonomous agent. It does not execute actions, learn, self-modify, or make uncontrolled decisions.
-
----
-
-## What ADAAD-6 is
-
-- **Deterministic planner**: same goal plus same config yields the same plan.
-- **ActionSpec-based**: plans are sequences of validated `ActionSpec` objects.
-- **Resource-aware**: planning output adapts to `mobile`, `edge`, `server` tiers.
-- **Auditable**: no randomness, no hidden state, no external side effects during planning.
-- **Sandboxed extensibility**: dynamic action modules are loaded only from validated, trusted paths.
 
 ---
 
-## What ADAAD-6 is not
+Overview
 
-- Not a self-directing or self-modifying AI.
-- Not an LLM wrapper.
-- Not an agent runtime or executor.
-- Not open-ended autonomy.
+ADAAD-6 is a governed autonomous planning and execution engine designed to operate safely in constrained environments while producing deterministic, auditable outcomes.
 
-Everything is explicit, bounded, and inspectable.
+It is not a general AI agent.
+It is a software factory core.
 
----
+ADAAD-6 generates plans, executes validated actions, records provable lineage, and produces machine- and human-readable artifacts without uncontrolled mutation.
 
-## Core concept: ActionSpec
+Key design goals:
 
-`ActionSpec` is the atomic unit of planning.
+Deterministic execution
 
-Each action declares:
+Governance before autonomy
 
-- `id`: identifier (planner assigns deterministic ids like `act-001`)
-- `action`: action name
-- `params`: structured parameters
-- `preconditions`: required prior effects
-- `effects`: produced state markers
-- `cost_hint`: relative execution cost used for tier filtering
+Stable schemas
 
-All specs are validated and normalized before use. Malformed specs are rejected early.
+Explicit failure modes
 
----
+Mobile-safe operation
 
-## Quickstart
+Ledger-backed provenance
 
-```python
-from adaad6.planning.planner import make_plan
-from adaad6.config import AdaadConfig
 
-cfg = AdaadConfig()
-plan = make_plan("Deliver a minimal credible plan", cfg)
-
-print(plan.to_dict())
-```
-
-### Planner guarantees
-
-- Same input → same output
-- No randomness
-- No hidden global state
-- No external calls during planning
-- Golden-testable output
 
 ---
 
-## Resource tiers
+Core Capabilities
 
-Planning output is filtered by `cfg.resource_tier`:
+1. Deterministic Planning Engine
 
-| Tier   | Behavior                    |
-| ------ | --------------------------- |
-| mobile | Low-cost actions only       |
-| edge   | Moderate-cost actions       |
-| server | No cost ceiling             |
+Plans are explicit DAGs of actions.
 
-Configure via:
+Each step has:
 
-```python
-from adaad6.config import AdaadConfig, ResourceTier
+Preconditions
 
-cfg = AdaadConfig(resource_tier=ResourceTier.MOBILE)
-```
+Effects
 
-Cost handling rule: actions with `cost_hint=None` are treated as unbounded and excluded from constrained tiers.
+Cost hints
+
+
+No hidden execution paths.
+
+
+2. Governed Action System
+
+Actions are:
+
+Validated
+
+Executed
+
+Post-checked
+
+
+Every action has a fixed schema contract.
+
+Failures are explicit, not implicit.
+
+
+3. Built-in Planning Templates
+
+ADAAD-6 ships with auditable, reusable planning templates:
+
+Template	Purpose
+
+doctor_report	Structural and health checks
+diff_report	Git-based changelog and patch analysis
+scaffold	Governed project scaffolding pipeline
+
+
+Templates emit Plan JSON, not side effects.
+
+4. Mobile-Tier Safety
+
+Heavy operations automatically skip on ResourceTier.MOBILE.
+
+Skips still return valid results.
+
+Summaries record limitations instead of failing.
+
+
+5. Ledger-Backed Provenance
+
+Optional append-only ledger.
+
+Events recorded deterministically.
+
+Ledger disabled or readonly modes are respected.
+
+Skips still mark completion.
+
+
 
 ---
 
-## Hard limits
+Repository Structure
 
-All plans respect strict deterministic limits:
+src/adaad6/
+├── cli.py                     # CLI entrypoint
+├── config.py                  # Runtime configuration
+├── planning/
+│   ├── planner.py             # Plan construction
+│   ├── spec.py                # ActionSpec + validation
+│   ├── templates.py           # Built-in planning templates
+│   └── actions/
+│       ├── _command_utils.py  # Safe command execution primitives
+│       ├── run_tests.py
+│       ├── generate_scaffold.py
+│       ├── record_ledger.py
+│       ├── select_template.py
+│       └── ...
+└── provenance/
+    └── ledger.py              # Hash-chained event log
 
-- `planner_max_steps`
-- `planner_max_seconds`
 
-Limits are enforced during plan construction and recorded in `plan.meta`:
+---
 
-```json
+CLI Usage
+
+Show Version
+
+adaad6 version
+
+Generate a Plan
+
+adaad6 plan "generate scaffold"
+
+Emit a Planning Template (JSON Only)
+
+Doctor Report
+
+adaad6 template doctor_report --destination doctor.txt
+
+Diff Report
+
+adaad6 template diff_report --base-ref origin/main --destination changelog.md
+
+Scaffold Pipeline
+
+adaad6 template scaffold --destination scaffold.md
+
+> These commands do not execute actions.
+They emit deterministic Plan JSON suitable for review, storage, or downstream execution.
+
+
+
+
+---
+
+Scaffold Template Flow
+
+The scaffold template is a governed multi-step pipeline:
+
+1. select_template
+
+
+2. generate_scaffold
+
+
+3. run_tests
+
+
+4. record_ledger
+
+
+5. summarize_results
+
+
+6. write_report
+
+
+
+Mobile tier behavior:
+
+Scaffold generation is skipped.
+
+Tests are skipped.
+
+Summary records limitations instead of failing.
+
+
+
+---
+
+Safe Command Execution
+
+ADAAD-6 never executes arbitrary shell strings.
+
+All command execution flows through:
+
+adaad6.planning.actions._command_utils
+
+Guarantees
+
+No shell execution
+
+No empty commands
+
+No byte tokens
+
+Allow-listed binaries only
+
+Stable return schema in all cases
+
+
+Execution Result Schema
+
 {
-  "truncated": false,
-  "time_capped": false,
-  "tier": "mobile"
+  "timeout": false,
+  "returncode": 0,
+  "stdout": "",
+  "stderr": "",
+  "error": null
 }
-```
+
+Errors are explicit:
+
+EmptyCommand
+
+NotPermitted
+
+FileNotFoundError
+
+Timeout
+
+
 
 ---
 
-## Action registry
+Governance Model (He65-Aligned)
 
-Action implementations are loaded dynamically from a sandboxed directory.
+Mutation is not automatic
 
-- **Config**: `AdaadConfig(actions_dir=".adaad/actions")`
-- **Built-ins**: pre-registered by the registry (see `adaad6.planning.actions.builtin_action_modules()`)
-- **Discovery**: `adaad6.planning.registry.discover_actions(...)`
+Plans are inspectable artifacts
 
-Safety guarantees:
+Execution is deterministic
 
-- Directory must resolve under `cfg.home`
-- No symlinks (directory traversal blocked)
-- No `..` traversal
-- Deterministic load order
+Lineage is append-only
 
-Required module functions:
+Drift is treated as failure
 
-- `validate(params, cfg)`
-- `run(validated)`
-- `postcheck(result, cfg)`
 
-Additional guarantees:
+ADAAD-6 is designed to be embedded inside larger autonomous systems without compromising control or auditability.
 
-- Function signatures are inspected
-- Variadic args (`*args`, `**kwargs`) are rejected
-- Duplicate action names are rejected
-- Dynamic imports are restricted to trusted paths only
 
 ---
 
-## Determinism and auditability
+What ADAAD-6 Is Not
 
-ADAAD-6 is engineered for systems where predictability matters more than cleverness:
+Not a chatbot
 
-- Compliance-sensitive pipelines
-- Embedded and mobile planning
-- CI-verified decision logic
-- Replayable and inspectable plans
+Not a self-mutating agent
 
-Planning is deterministic; action execution may depend on external runtimes and should be audited separately.
+Not a probabilistic executor
 
----
+Not a black box
 
-## Status and scope
 
-ADAAD-6 is a planning substrate.
+Every decision path is visible.
+Every side effect is intentional.
 
-Execution, orchestration, learning, and autonomy layers are intentionally out of scope and must be built explicitly on top if needed.
 
 ---
 
-## Docs
+Testing
 
-- `ARCHITECTURE.md` (system overview, invariants, diagrams)
-- `docs/ACTION_AUTHORING.md` (plugin writer guide)
-- `docs/DESIGN_RATIONALE.md` (why autonomy is excluded)
-- `docs/` (additional references)
+Run full test suite:
+
+python -m unittest -q
+
+The test suite enforces:
+
+Schema stability
+
+Mobile tier behavior
+
+Command safety
+
+Ledger correctness
+
+Template integrity
+
+
 
 ---
 
-## License
+Strategic Positioning
 
-See `LICENSE`.
+ADAAD-6 is the core execution spine for:
+
+Autonomous code factories
+
+Governed agent swarms
+
+Compliance-critical automation
+
+Mobile-constrained AI systems
+
+Long-running self-evolving software
+
+
+It optimizes for trust, determinism, and longevity, not novelty.
+
+
+---
+
+License
+
+Specify your license here.
+
+
