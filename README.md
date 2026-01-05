@@ -1,56 +1,169 @@
 # ADAAD-6
 
-## Credibility-first doctrine
-ADAAD-6 exists to prove claims, not to accumulate features. Every component is scoped to a clear, falsifiable responsibility so that credibility is earned through evidence. The system prioritizes auditable behaviors, predictable interfaces, and minimal inter-module coupling.
+Deterministic planning core for auditable, resource-bound systems.
 
-### Scope and module boundaries
-- **Command & Orchestration**: A slim controller that sequences tasks, enforces policies, and exposes deterministic entry points. No embedded business logic; it only routes and validates.
-- **Reasoning & Decomposition**: Modules that transform objectives into actionable plans using bounded reasoning cycles. Inputs/outputs are structured and serializable; side effects are disallowed.
-- **Memory & State**: Persistence layer for episodic traces and durable artifacts with explicit retention rules. Writing requires provenance metadata; reading requires capability checks.
-- **Execution Adapters**: Sandbox-facing workers that perform external actions with idempotent contracts and auditable logs. Adapters cannot call each other directly; the orchestrator mediates all calls.
-- **Assurance & Verification**: Cross-cutting hooks (schema checks, invariants, audits) that run before/after critical actions. These modules produce machine-verifiable evidence instead of dashboards only.
+ADAAD-6 converts a goal into a predictable, validated sequence of actions under strict limits. It is intentionally narrow in scope, fully inspectable, and safe by default.
 
-### Responsibilities
-- Maintain minimal public APIs with typed contracts and reproducible behaviors.
-- Route all side effects through adapters gated by policy checks.
-- Record proofs (logs, traces, checksums) for every externally observable action.
-- Keep reasoning loops bounded (iteration limits, time caps) and observable.
-- Prefer small, composable workers over monoliths; every boundary should make verification easier.
+> ADAAD-6 is not an autonomous agent. It does not execute actions, learn, self-modify, or make uncontrolled decisions.
 
-## Invariants and verification hooks
-The following claims must hold; CI should contain or trigger checks for each item:
-- **Deterministic inputs/outputs**: Given the same request, orchestration produces the same planned steps unless configuration changes are present. Verification: golden snapshot tests for planner outputs.
-- **Bounded reasoning**: No planner exceeds configured step/time limits. Verification: unit tests with timers and iteration counters; CI guardrails that fail on overrun.
-- **Auditable side effects**: Every adapter call emits a structured log with actor, intent, inputs, outputs, and checksum. Verification: contract tests that assert log shape and checksum presence.
-- **Provenance-enforced storage**: Writes to memory require provenance tokens; reads enforce capability scope. Verification: policy tests and simulated access attempts with expected denials.
-- **Idempotent adapters**: External operations are safe to retry. Verification: integration tests that re-run the same action and assert stable outputs/state.
-- **Configuration-first safety**: Defaults are conservative; escalations require explicit flags. Verification: configuration lint that rejects unsafe defaults and missing limits.
+---
 
-### Claims-to-components mapping
-- Deterministic inputs/outputs → Orchestrator + Planner interfaces + Golden snapshot suite.
-- Bounded reasoning → Planner loop controls + Time/step guards + CI overrun tests.
-- Auditable side effects → Execution Adapters + Structured logging library + Log schema contracts.
-- Provenance-enforced storage → Memory layer + Capability validator + Policy fixtures.
-- Idempotent adapters → Adapter contracts + Integration retry harness.
-- Configuration-first safety → Config schemas + Lint checks + Safe-default presets.
+## What ADAAD-6 is
 
-## Non-goals and anti-features
-- No implicit network or filesystem access; every side effect must be explicit and logged.
-- No hidden state, global singletons, or mutable caches inside reasoning modules.
-- No unbounded agent loops or self-modifying behaviors without human-reviewed proofs.
-- No opaque heuristics without measurable accuracy/error budgets.
-- No cross-adapter coupling that bypasses orchestration.
-- No “move fast” shortcuts that weaken verification or observability.
+- **Deterministic planner**: same goal plus same config yields the same plan.
+- **ActionSpec-based**: plans are sequences of validated `ActionSpec` objects.
+- **Resource-aware**: planning output adapts to `mobile`, `edge`, `server` tiers.
+- **Auditable**: no randomness, no hidden state, no external side effects during planning.
+- **Sandboxed extensibility**: dynamic action modules are loaded only from validated, trusted paths.
 
-## Roadmap (fork-ready, milestone-linked)
-1. **Baseline credibility (Week 1)**: Establish config schemas, golden planner tests, and log contract checks; wire CI to fail on invariant drift.
-2. **Auditable adapters (Week 2)**: Implement structured logging wrappers and idempotent adapter templates; add retry harness tests.
-3. **Provenance-first memory (Week 3)**: Enforce provenance tokens on writes and capability scopes on reads; add policy simulation tests.
-4. **Bounded reasoning (Week 4)**: Add iteration/time guards to planners with CI overrun detection; publish safe-default presets.
-5. **Hardening and misuse resistance (Week 5+)**: Expand non-goal guardrails (lint rules, config validators), tighten observability, and document escalation paths.
+---
 
-### Terminology
-- **Adapter**: A sandboxed worker that performs a side effect under orchestrator control.
-- **Planner**: Reasoning module that decomposes goals into steps under bounded constraints.
-- **Provenance token**: Metadata proving origin and authorization for a state mutation.
-- **Golden snapshot**: Recorded planner output used to detect drift or non-determinism.
+## What ADAAD-6 is not
+
+- Not a self-directing or self-modifying AI.
+- Not an LLM wrapper.
+- Not an agent runtime or executor.
+- Not open-ended autonomy.
+
+Everything is explicit, bounded, and inspectable.
+
+---
+
+## Core concept: ActionSpec
+
+`ActionSpec` is the atomic unit of planning.
+
+Each action declares:
+
+- `id`: identifier (planner assigns deterministic ids like `act-001`)
+- `action`: action name
+- `params`: structured parameters
+- `preconditions`: required prior effects
+- `effects`: produced state markers
+- `cost_hint`: relative execution cost used for tier filtering
+
+All specs are validated and normalized before use. Malformed specs are rejected early.
+
+---
+
+## Quickstart
+
+```python
+from adaad6.planning.planner import make_plan
+from adaad6.config import AdaadConfig
+
+cfg = AdaadConfig()
+plan = make_plan("Deliver a minimal credible plan", cfg)
+
+print(plan.to_dict())
+```
+
+### Planner guarantees
+
+- Same input → same output
+- No randomness
+- No hidden global state
+- No external calls during planning
+- Golden-testable output
+
+---
+
+## Resource tiers
+
+Planning output is filtered by `cfg.resource_tier`:
+
+| Tier   | Behavior                    |
+| ------ | --------------------------- |
+| mobile | Low-cost actions only       |
+| edge   | Moderate-cost actions       |
+| server | No cost ceiling             |
+
+Configure via:
+
+```python
+from adaad6.config import AdaadConfig, ResourceTier
+
+cfg = AdaadConfig(resource_tier=ResourceTier.MOBILE)
+```
+
+Cost handling rule: actions with `cost_hint=None` are treated as unbounded and excluded from constrained tiers.
+
+---
+
+## Hard limits
+
+All plans respect strict deterministic limits:
+
+- `planner_max_steps`
+- `planner_max_seconds`
+
+Limits are enforced during plan construction and recorded in `plan.meta`:
+
+```json
+{
+  "truncated": false,
+  "time_capped": false,
+  "tier": "mobile"
+}
+```
+
+---
+
+## Action registry
+
+Action implementations are loaded dynamically from a sandboxed directory.
+
+- **Config**: `AdaadConfig(actions_dir=".adaad/actions")`
+- **Discovery**: `adaad6.planning.registry.discover_actions(...)`
+
+Safety guarantees:
+
+- Directory must resolve under `cfg.home`
+- No symlinks (directory traversal blocked)
+- No `..` traversal
+- Deterministic load order
+
+Required module functions:
+
+- `validate(params, cfg)`
+- `run(validated)`
+- `postcheck(result, cfg)`
+
+Additional guarantees:
+
+- Function signatures are inspected
+- Variadic args (`*args`, `**kwargs`) are rejected
+- Duplicate action names are rejected
+- Dynamic imports are restricted to trusted paths only
+
+---
+
+## Determinism and auditability
+
+ADAAD-6 is engineered for systems where predictability matters more than cleverness:
+
+- Compliance-sensitive pipelines
+- Embedded and mobile planning
+- CI-verified decision logic
+- Replayable and inspectable plans
+
+---
+
+## Status and scope
+
+ADAAD-6 is a planning substrate.
+
+Execution, orchestration, learning, and autonomy layers are intentionally out of scope and must be built explicitly on top if needed.
+
+---
+
+## Docs
+
+- `ARCHITECTURE.md` (system overview, invariants, diagrams)
+- `docs/` (additional references)
+
+---
+
+## License
+
+See `LICENSE`.
