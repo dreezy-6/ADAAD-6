@@ -163,6 +163,8 @@ Execution, orchestration, learning, and autonomy layers are intentionally out of
 ## Docs
 
 - `ARCHITECTURE.md` (system overview, invariants, diagrams)
+- `docs/ACTION_AUTHORING.md` (plugin writer guide)
+- `docs/DESIGN_RATIONALE.md` (why autonomy is excluded)
 - `docs/` (additional references)
 
 ---

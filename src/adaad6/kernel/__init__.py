@@ -1,4 +1,5 @@
 from adaad6.kernel.admissibility import is_admissible, refusal_mode
+from adaad6.kernel.context import ArtifactRegistry, ConfigSnapshot, KernelContext, WorkspacePaths
 from adaad6.kernel.failures import (
     DETERMINISM_BREACH,
     EVIDENCE_MISSING,
@@ -11,10 +12,14 @@ from adaad6.kernel.record import make_refusal_record
 from adaad6.kernel.vectors import VECTOR_DAG0
 
 __all__ = [
+    "ArtifactRegistry",
+    "ConfigSnapshot",
     "DETERMINISM_BREACH",
     "EVIDENCE_MISSING",
     "INTEGRITY_VIOLATION",
+    "KernelContext",
     "UNLOGGED_EXECUTION",
+    "WorkspacePaths",
     "KernelCrash",
     "attach_hash",
     "canonical_json",
