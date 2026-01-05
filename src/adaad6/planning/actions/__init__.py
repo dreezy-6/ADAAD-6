@@ -11,6 +11,9 @@ from importlib import import_module
 from types import ModuleType
 
 _BUILTIN_ACTION_MODULE_NAMES: tuple[str, ...] = (
+    "select_template",
+    "generate_scaffold",
+    "record_ledger",
     "scan_repo_tree",
     "scan_risks",
     "git_diff_snapshot",

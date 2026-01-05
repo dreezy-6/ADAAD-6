@@ -4,6 +4,77 @@ from adaad6.planning.planner import Plan
 from adaad6.planning.spec import ActionSpec, validate_action_spec_list
 
 
+def compose_scaffold_template(destination: str = "scaffold_report.txt") -> Plan:
+    steps = validate_action_spec_list(
+        [
+            ActionSpec(
+                id="select-template",
+                action="select_template",
+                params={"name": "scaffold", "available": ["scaffold", "compliance-report"]},
+                preconditions=(),
+                effects=("template_selected",),
+                cost_hint=0.05,
+            ),
+            ActionSpec(
+                id="generate-scaffold",
+                action="generate_scaffold",
+                params={"template": "scaffold", "components": ["core", "assurance", "runtime"]},
+                preconditions=("template_selected",),
+                effects=("scaffold_ready",),
+                cost_hint=1.2,
+            ),
+            ActionSpec(
+                id="verify-scaffold",
+                action="run_tests",
+                params={"command": ["pytest", "-q"], "timeout": 120},
+                preconditions=("scaffold_ready",),
+                effects=("verification_complete",),
+                cost_hint=1.1,
+            ),
+            ActionSpec(
+                id="record-ledger",
+                action="record_ledger",
+                params={"event_type": "scaffold_plan", "payload": {"summary": "Scaffold template actions executed"}},
+                preconditions=("verification_complete",),
+                effects=("ledger_step_complete",),
+                cost_hint=0.2,
+            ),
+            ActionSpec(
+                id="summarize-scaffold",
+                action="summarize_results",
+                params={
+                    "title": "Scaffold planning summary",
+                    "results": [
+                        "Template: Use select_template.selected",
+                        "Generation: Use generate_scaffold.scaffold or generate_scaffold.limitations",
+                        "Verification: Use run_tests.returncode or run_tests.reason",
+                        "Ledger: Use record_ledger.event or record_ledger.reason (skips still mark completion)",
+                        "Mobile fallback: skip heavy steps and note limitations in summary",
+                    ],
+                },
+                preconditions=("ledger_step_complete",),
+                effects=("summary_ready",),
+                cost_hint=0.1,
+            ),
+            ActionSpec(
+                id="write-scaffold-report",
+                action="write_report",
+                params={"destination": destination, "body": "Use summarize_results.summary"},
+                preconditions=("summary_ready",),
+                effects=("report_written",),
+                cost_hint=0.05,
+            ),
+        ]
+    )
+    meta = {
+        "template": "scaffold",
+        "destination": destination,
+        "tier_fallback": "mobile tier skips scaffold generation and verification; summary notes limitations",
+        "actions": "template selection, scaffold generation, verification, ledger record",
+    }
+    return Plan(goal="scaffold_plan", steps=steps, meta=meta)
+
+
 def compose_doctor_report_template(destination: str = "doctor_report.txt") -> Plan:
     steps = validate_action_spec_list(
         [
@@ -85,4 +156,4 @@ def compose_diff_report_template(base_ref: str = "HEAD", destination: str = "cha
     return Plan(goal="diff_report", steps=steps, meta=meta)
 
 
-__all__ = ["compose_doctor_report_template", "compose_diff_report_template"]
+__all__ = ["compose_scaffold_template", "compose_doctor_report_template", "compose_diff_report_template"]
