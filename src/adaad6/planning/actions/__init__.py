@@ -13,6 +13,8 @@ from types import ModuleType
 _BUILTIN_ACTION_MODULE_NAMES: tuple[str, ...] = (
     "scan_repo_tree",
     "scan_risks",
+    "git_diff_snapshot",
+    "format_changelog",
     "mutate_code",
     "generate_patch",
     "run_tests",
