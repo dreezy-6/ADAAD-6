@@ -87,7 +87,7 @@ class RuntimeHealthTest(unittest.TestCase):
             for d in required_dirs:
                 (pkg_root / d).mkdir(parents=True, exist_ok=True)
 
-            required_files = ["__init__.py", "config.py"]
+            required_files = ["__init__.py", "config.py", "cli.py", "__main__.py"]
             for f in required_files:
                 (pkg_root / f).write_text("", encoding="utf-8")
 
@@ -108,7 +108,7 @@ class RuntimeHealthTest(unittest.TestCase):
             for d in required_dirs:
                 (pkg_root / d).mkdir(parents=True, exist_ok=True)
 
-            required_files = ["__init__.py", "config.py"]
+            required_files = ["__init__.py", "config.py", "cli.py", "__main__.py"]
             for f in required_files:
                 (pkg_root / f).write_text("", encoding="utf-8")
 
@@ -129,7 +129,7 @@ class RuntimeHealthTest(unittest.TestCase):
             for d in required_dirs:
                 (pkg_root / d).mkdir(parents=True, exist_ok=True)
 
-            required_files = ["__init__.py", "config.py"]
+            required_files = ["__init__.py", "config.py", "cli.py", "__main__.py"]
             for f in required_files:
                 (pkg_root / f).write_text("", encoding="utf-8")
 

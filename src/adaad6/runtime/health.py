@@ -15,6 +15,8 @@ def _package_root() -> Path:
 def _required_entries() -> set[str]:
     return {
         "__init__.py",
+        "__main__.py",
+        "cli.py",
         "config.py",
         "runtime",
         "planning",
@@ -40,6 +42,8 @@ def _allowed_files() -> set[str]:
     return {
         "__init__.py",
         "config.py",
+        "__main__.py",
+        "cli.py",
         "py.typed",
         "version.py",
         "_version.py",
