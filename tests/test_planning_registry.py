@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from adaad6.config import AdaadConfig
+from adaad6.planning.actions import builtin_action_names
 from adaad6.planning.registry import discover_actions
 
 
@@ -53,7 +54,23 @@ class PlanningRegistryTest(unittest.TestCase):
             cfg = _make_cfg(root)
             actions = discover_actions(cfg=cfg)
 
-            self.assertEqual(list(actions.keys()), ["a_action", "b_action"])
+            expected = list(builtin_action_names()) + ["a_action", "b_action"]
+
+            self.assertEqual(list(actions.keys()), expected)
+
+    def test_discover_actions_includes_builtins_when_directory_missing(self) -> None:
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            cfg = _make_cfg(root, actions_dir="missing_dir")
+
+            actions = discover_actions(cfg=cfg)
+
+            self.assertEqual(set(actions.keys()), set(builtin_action_names()))
+            for name in builtin_action_names():
+                module = actions[name]
+                self.assertTrue(callable(module.validate))
+                self.assertTrue(callable(module.run))
+                self.assertTrue(callable(module.postcheck))
 
     def test_discover_actions_missing_required_function(self) -> None:
         with TemporaryDirectory() as td:

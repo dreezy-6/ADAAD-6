@@ -10,6 +10,7 @@ from types import ModuleType
 from typing import Any, Callable, Iterable
 
 from adaad6.config import AdaadConfig
+from adaad6.planning.actions import builtin_action_modules
 
 ActionValidator = Callable[[dict[str, Any], AdaadConfig], Any]
 ActionRunner = Callable[[Any], Any]
@@ -132,18 +133,25 @@ def _ensure_actions_dir(actions_dir: Path, *, cfg: AdaadConfig) -> Path:
     return resolved
 
 
+def _register_module(name: str, module: ModuleType, *, actions: dict[str, ActionModule]) -> None:
+    action_module = _validate_action_module(name.lower(), module)
+    if action_module.name in actions:
+        raise ValueError(f"Duplicate action name: {action_module.name}")
+    actions[action_module.name] = action_module
+
+
 def discover_actions(actions_dir: Path | None = None, *, cfg: AdaadConfig) -> dict[str, ActionModule]:
     base_dir = _ensure_actions_dir(actions_dir or Path(cfg.actions_dir), cfg=cfg)
     actions: dict[str, ActionModule] = {}
+
+    for name, module in builtin_action_modules():
+        _register_module(name, module, actions=actions)
 
     for path in _iter_action_paths(base_dir):
         if path.is_symlink():
             raise ValueError("action files must not be symlinks")
         module = _load_module(path)
-        action_module = _validate_action_module(path.stem.lower(), module)
-        if action_module.name in actions:
-            raise ValueError(f"Duplicate action name: {action_module.name}")
-        actions[action_module.name] = action_module
+        _register_module(path.stem, module, actions=actions)
 
     return actions
 
