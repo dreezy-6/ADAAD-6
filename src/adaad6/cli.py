@@ -130,6 +130,23 @@ def _build_parser() -> argparse.ArgumentParser:
     plan_parser = sub.add_parser("plan", help="Generate a plan for a goal")
     plan_parser.add_argument("goal", help="Goal to plan for")
 
+    template_parser = sub.add_parser("template", help="Emit a planning template JSON")
+    template_parser.add_argument(
+        "name",
+        choices=("doctor_report", "diff_report"),
+        help="Template name to render",
+    )
+    template_parser.add_argument(
+        "--destination",
+        default=None,
+        help="Optional destination override written into the template metadata",
+    )
+    template_parser.add_argument(
+        "--base-ref",
+        default="HEAD",
+        help="Base git ref for diff_report templates",
+    )
+
     run_parser = sub.add_parser("run", help="Execute a deterministic adapter call")
     run_parser.add_argument("--intent", default="noop", help="Intent name for the adapter call")
     run_parser.add_argument("--inputs", default="{}", help="JSON object of inputs for the adapter call")
@@ -231,6 +248,23 @@ def main(argv: list[str] | None = None) -> int:
             plan = make_plan(goal=args.goal, cfg=cfg)
             _safe_cli_log(cfg, action="plan", outcome="ok", details={"goal": args.goal, "plan": plan.to_dict()})
             _emit({"ok": True, "plan": plan.to_dict()})
+            return 0
+
+        if args.command == "template":
+            destination = getattr(args, "destination", None)
+            if args.name == "doctor_report":
+                from adaad6.planning.templates import compose_doctor_report_template
+
+                template = compose_doctor_report_template(destination=destination or "doctor_report.txt").to_dict()
+            else:
+                from adaad6.planning.templates import compose_diff_report_template
+
+                template = compose_diff_report_template(
+                    base_ref=getattr(args, "base_ref", "HEAD"),
+                    destination=destination or "changelog.md",
+                ).to_dict()
+            _safe_cli_log(cfg, action="template", outcome="ok", details={"name": args.name, "template": template})
+            _emit({"ok": True, "template": template})
             return 0
 
         if args.command == "run":
