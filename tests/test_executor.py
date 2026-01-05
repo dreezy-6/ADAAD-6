@@ -259,11 +259,17 @@ class ExecutorTest(unittest.TestCase):
             events = read_events(cfg)
 
         self.assertTrue(log.ok)
-        self.assertEqual(3, len(events))
-        self.assertEqual("execution_run_start", events[0]["type"])
-        self.assertEqual("execution_step", events[1]["type"])
-        self.assertEqual("execution_run_end", events[2]["type"])
-        self.assertEqual(log.context.run_id, events[0]["payload"]["run_id"])
+        self.assertEqual(4, len(events))
+        self.assertEqual(
+            ["execution_run_start", "execution_step", "execution_artifact", "execution_run_end"],
+            [event["type"] for event in events],
+        )
+        for event in events:
+            self.assertIn("content_hash", event["payload"])
+            self.assertEqual(log.context.run_id, event["payload"]["run_id"])
+        artifact_event = events[2]
+        self.assertIsNone(artifact_event["payload"]["parent_hash"])
+        self.assertEqual("act-001", artifact_event["payload"]["action_id"])
 
     def test_debug_detail_is_hidden_from_serialized_output(self) -> None:
         def validate(params, cfg):
@@ -281,6 +287,83 @@ class ExecutorTest(unittest.TestCase):
         serialized_stage = log.steps[0].to_dict()["stages"][0]
         self.assertNotIn("debug_detail", serialized_stage)
         self.assertNotIn("Traceback", serialized_stage.get("detail", ""))
+
+    def test_execute_and_record_requires_ledger_when_flag_set(self) -> None:
+        def validate(params, cfg):
+            return params
+
+        def run(validated):
+            return {"ok": True}
+
+        def postcheck(result, cfg):
+            return result
+
+        actions = {"demo": _action_module("demo", validate, run, postcheck)}
+        plan = [_spec("demo")]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = AdaadConfig(
+                home=tmpdir,
+                ledger_enabled=False,
+                ledger_dir=".adaad/ledger",
+                ledger_filename="events.jsonl",
+                log_path=".logs/adaad6.jsonl",
+                actions_dir=".actions",
+            )
+            with self.assertRaises(RuntimeError):
+                execute_and_record(plan, actions=actions, cfg=cfg, ledger_required=True)
+
+    def test_execute_and_record_rejects_read_only_ledger_when_required(self) -> None:
+        def validate(params, cfg):
+            return params
+
+        def run(validated):
+            return {"ok": True}
+
+        def postcheck(result, cfg):
+            return result
+
+        actions = {"demo": _action_module("demo", validate, run, postcheck)}
+        plan = [_spec("demo")]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = AdaadConfig(
+                home=tmpdir,
+                ledger_enabled=True,
+                ledger_dir=".adaad/ledger",
+                ledger_filename="events.jsonl",
+                ledger_readonly=True,
+                log_path=".logs/adaad6.jsonl",
+                actions_dir=".actions",
+            )
+            with self.assertRaises(RuntimeError):
+                execute_and_record(plan, actions=actions, cfg=cfg, ledger_required=True)
+
+    def test_execute_and_record_rejects_read_only_ledger_when_not_required(self) -> None:
+        def validate(params, cfg):
+            return params
+
+        def run(validated):
+            return {"ok": True}
+
+        def postcheck(result, cfg):
+            return result
+
+        actions = {"demo": _action_module("demo", validate, run, postcheck)}
+        plan = [_spec("demo")]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = AdaadConfig(
+                home=tmpdir,
+                ledger_enabled=True,
+                ledger_dir=".adaad/ledger",
+                ledger_filename="events.jsonl",
+                ledger_readonly=True,
+                log_path=".logs/adaad6.jsonl",
+                actions_dir=".actions",
+            )
+            with self.assertRaises(RuntimeError):
+                execute_and_record(plan, actions=actions, cfg=cfg, ledger_required=False)
 
 
 if __name__ == "__main__":  # pragma: no cover

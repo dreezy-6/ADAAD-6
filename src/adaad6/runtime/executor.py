@@ -8,7 +8,7 @@ import sys
 from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import quote
 
-from adaad6.kernel.hashing import canonical_json
+from adaad6.kernel.hashing import canonical_json, hash_object
 from adaad6.config import AdaadConfig
 from adaad6.kernel.failures import (
     EVIDENCE_MISSING,
@@ -18,7 +18,7 @@ from adaad6.kernel.failures import (
 from adaad6.kernel.context import KernelContext
 from adaad6.planning.registry import ActionModule
 from adaad6.planning.spec import ActionSpec
-from adaad6.provenance.ledger import append_event
+from adaad6.provenance.ledger import append_event, ensure_ledger
 
 
 ARTIFACT_INLINE_MAX_BYTES = 65_536
@@ -211,6 +211,14 @@ def _utc_now_iso_z() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def _payload_with_content_hash(payload: dict[str, Any]) -> dict[str, Any]:
+    base = dict(payload)
+    base_without_hash = {k: v for k, v in base.items() if k != "content_hash"}
+    canonical_payload = json.loads(canonical_json(base_without_hash))
+    base["content_hash"] = hash_object(canonical_payload)
+    return base
+
+
 def _run_plan(
     plan: Sequence[ActionSpec] | Iterable[ActionSpec],
     *,
@@ -218,6 +226,7 @@ def _run_plan(
     cfg: AdaadConfig,
     context: KernelContext,
     on_step: Callable[[StepLog, KernelContext], None] | None = None,
+    on_artifact: Callable[[str, str, ActionSpec, KernelContext], None] | None = None,
     capture_debug: bool = False,
 ) -> ExecutionLog:
     steps: list[StepLog] = []
@@ -266,11 +275,17 @@ def _run_plan(
             continue
 
         step = _execute_step(spec, module=module, cfg=cfg, capture_debug=capture_debug)
+        artifact: tuple[str, str] | None = None
         if step.status == "ok" and step.output is not None:
-            context = context.register_artifact(f"{spec.id}:{spec.action}:result", _artifact_uri(step.output))
+            artifact_name = f"{spec.id}:{spec.action}:result"
+            artifact_uri = _artifact_uri(step.output)
+            context = context.register_artifact(artifact_name, artifact_uri)
+            artifact = (artifact_name, artifact_uri)
         steps.append(step)
         if on_step:
             on_step(step, context)
+        if artifact and on_artifact:
+            on_artifact(artifact[0], artifact[1], spec, context)
         if step.status != "ok":
             crash_code = step.code
             crash_detail = step.detail
@@ -312,35 +327,70 @@ def execute_and_record(
     cfg: AdaadConfig,
     ctx: KernelContext | None = None,
     actor: str = "executor",
+    ledger_required: bool = False,
     capture_debug: bool = False,
 ) -> ExecutionLog:
     cfg.validate()
+    plan_items = tuple(plan)
     context = ctx or KernelContext.build(cfg)
+    if ledger_required and not cfg.ledger_enabled:
+        raise RuntimeError("ledger_required=True but ledger is disabled")
     if not cfg.ledger_enabled:
-        return _run_plan(plan, actions=actions, cfg=cfg, context=context, capture_debug=capture_debug)
+        return _run_plan(plan_items, actions=actions, cfg=cfg, context=context, capture_debug=capture_debug)
+
+    if cfg.ledger_readonly:
+        raise RuntimeError("ledger is read-only")
+    ensure_ledger(cfg)
 
     log: ExecutionLog | None = None
-    start_payload = {"run_id": context.run_id, "config_hash": context.config.hash}
+    last_artifact_hash: str | None = None
+    start_payload = {
+        "run_id": context.run_id,
+        "config_hash": context.config.hash,
+        "plan": [spec.to_dict() for spec in plan_items],
+    }
+
+    def _append_hashed_event(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return append_event(cfg, event_type, _payload_with_content_hash(payload), _utc_now_iso_z(), actor)
+
     try:
-        append_event(cfg, "execution_run_start", start_payload, _utc_now_iso_z(), actor)
+        _append_hashed_event("execution_run_start", start_payload)
 
         def _on_step(step: StepLog, ctx: KernelContext) -> None:
-            append_event(
-                cfg,
+            _append_hashed_event(
                 "execution_step",
-                {"run_id": ctx.run_id, "step": step.to_dict()},
-                _utc_now_iso_z(),
-                actor,
+                {"run_id": ctx.run_id, "action_id": step.id, "step": step.to_dict()},
             )
 
-        log = _run_plan(plan, actions=actions, cfg=cfg, context=context, on_step=_on_step, capture_debug=capture_debug)
+        def _on_artifact(name: str, uri: str, spec: ActionSpec, ctx: KernelContext) -> None:
+            nonlocal last_artifact_hash
+            event = _append_hashed_event(
+                "execution_artifact",
+                {
+                    "run_id": ctx.run_id,
+                    "action_id": spec.id,
+                    "artifact": {"name": name, "uri": uri},
+                    "parent_hash": last_artifact_hash,
+                },
+            )
+            last_artifact_hash = event["payload"]["content_hash"]
+
+        log = _run_plan(
+            plan_items,
+            actions=actions,
+            cfg=cfg,
+            context=context,
+            on_step=_on_step,
+            on_artifact=_on_artifact,
+            capture_debug=capture_debug,
+        )
         return log
     finally:
         end_context = log.context if log else context
         payload = {"run_id": end_context.run_id, "log": log.to_dict() if log else {"ok": False, "status": "crash"}}
         pending_exc = sys.exc_info()[1]
         try:
-            append_event(cfg, "execution_run_end", payload, _utc_now_iso_z(), actor)
+            _append_hashed_event("execution_run_end", payload)
         except Exception:
             if pending_exc is None:
                 raise
