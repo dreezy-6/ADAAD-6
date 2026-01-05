@@ -95,27 +95,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if ok else 1
 
         if args.command == "doctor":
-            from adaad6.runtime.boot import boot_sequence
-            from adaad6.runtime.health import check_structure_details
+            from adaad6.assurance import run_doctor
 
-            health_details = check_structure_details(cfg=cfg)
-            boot_result = boot_sequence(cfg=cfg)
-            structure = health_details.get("structure") or {}
-            ledger_dirs = health_details.get("ledger_dirs") or {}
-            ok = bool(boot_result.get("ok")) and bool(structure.get("ok", structure is True)) and bool(
-                ledger_dirs.get("ok", ledger_dirs is True)
-            )
-            report = {
-                "ok": ok,
-                "checks": {
-                    "boot": {"ok": bool(boot_result.get("ok"))},
-                    "structure": {"ok": bool(structure.get("ok", structure is True))},
-                    "ledger_dirs": {"ok": bool(ledger_dirs.get("ok", ledger_dirs is True))},
-                },
-                "details": {"health": health_details, "boot": boot_result},
-            }
+            report = run_doctor(cfg=cfg)
             _emit(report)
-            return 0 if ok else 1
+            return 0 if report.get("ok") else 1
 
         if args.command == "plan":
             from adaad6.planning.planner import make_plan
