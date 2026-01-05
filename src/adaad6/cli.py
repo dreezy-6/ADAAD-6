@@ -27,6 +27,16 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
     return parsed
 
 
+def _safe_cli_log(cfg: Any, *, action: str, outcome: str, details: dict[str, Any]) -> None:
+    try:
+        from adaad6.assurance.logging import append_jsonl_log_event
+
+        append_jsonl_log_event(cfg=cfg, action=action, outcome=outcome, details=details)
+    except Exception:  # pragma: no cover - defensive best-effort logging
+        # CLI success/failure must not depend on logging availability.
+        pass
+
+
 class _EchoAdapter:
     name = "cli_echo"
 
@@ -81,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
             from adaad6.runtime.boot import boot_sequence
 
             result = boot_sequence(cfg=cfg)
+            outcome = "ok" if result.get("ok") else "error"
+            _safe_cli_log(cfg, action="boot", outcome=outcome, details={"result": result})
             _emit(result)
             return 0 if result.get("ok") else 1
 
@@ -91,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
             structure = details.get("structure") or {}
             ledger_dirs = details.get("ledger_dirs") or {}
             ok = bool(structure.get("ok", structure is True)) and bool(ledger_dirs.get("ok", ledger_dirs is True))
+            _safe_cli_log(cfg, action="health", outcome="ok" if ok else "error", details={"details": details})
             _emit({"ok": ok, "details": details})
             return 0 if ok else 1
 
@@ -98,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
             from adaad6.assurance import run_doctor
 
             report = run_doctor(cfg=cfg)
+            _safe_cli_log(cfg, action="doctor", outcome="ok" if report.get("ok") else "error", details={"report": report})
             _emit(report)
             return 0 if report.get("ok") else 1
 
@@ -105,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
             from adaad6.planning.planner import make_plan
 
             plan = make_plan(goal=args.goal, cfg=cfg)
+            _safe_cli_log(cfg, action="plan", outcome="ok", details={"goal": args.goal, "plan": plan.to_dict()})
             _emit({"ok": True, "plan": plan.to_dict()})
             return 0
 
@@ -112,6 +127,12 @@ def main(argv: list[str] | None = None) -> int:
             inputs = _parse_json_object(args.inputs)
             adapter = _EchoAdapter()
             result = adapter.run(intent=args.intent, inputs=inputs, actor=args.actor, cfg=cfg)
+            _safe_cli_log(
+                cfg,
+                action="run",
+                outcome="ok" if result.ok else "error",
+                details={"intent": args.intent, "inputs": inputs, "result": result.output, "log": result.log},
+            )
             _emit({"ok": result.ok, "output": result.output, "log": result.log})
             return 0 if result.ok else 1
 

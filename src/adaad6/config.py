@@ -50,6 +50,7 @@ class AdaadConfig:
     resource_scaling: float = 1.0  # derived, deterministic
 
     log_schema_version: str = "1"
+    log_path: str = ".adaad/logs/adaad6.jsonl"
 
     ledger_enabled: bool = False
     ledger_dir: str = ".adaad/ledger"
@@ -81,7 +82,11 @@ class AdaadConfig:
         if (self.config_schema_version or "").strip() != CONFIG_SCHEMA_VERSION:
             raise ValueError("config_schema_version mismatch")
 
+        if not (self.log_path or "").strip():
+            raise ValueError("log_path must be set")
+
         home = Path(self.home).expanduser().resolve()
+        _enforce_log_path_sandbox(self.log_path, home=home)
 
         # hard caps
         if not (1 <= self.planner_max_steps <= 10_000):
@@ -264,6 +269,36 @@ def _enforce_ledger_dir_sandbox(ledger_dir: str, *, home: Path) -> None:
             raise ValueError("ledger_dir must not traverse symlinks (sandbox violation)")
 
 
+def _enforce_log_path_sandbox(log_path: str, *, home: Path) -> None:
+    raw = (log_path or "").strip()
+    posix = PurePosixPath(raw)
+    win = PureWindowsPath(raw)
+
+    if posix.is_absolute() or win.is_absolute() or win.drive:
+        raise ValueError("log_path must be a relative path")
+    if raw.startswith("~"):
+        raise ValueError("log_path must not start with ~")
+    if ".." in posix.parts or ".." in win.parts:
+        raise ValueError("log_path must not contain parent directory traversal")
+
+    target = home / raw
+    try:
+        resolved = target.resolve(strict=False)
+    except TypeError:
+        resolved = Path(os.path.abspath(str(target)))
+
+    try:
+        rel = resolved.relative_to(home)
+    except Exception as exc:
+        raise ValueError("log_path must resolve under home/") from exc
+
+    probe = home
+    for part in rel.parts[:-1]:  # directories only, ignore filename
+        probe = probe / part
+        if probe.exists() and probe.is_symlink():
+            raise ValueError("log_path must not traverse symlinks")
+
+
 def load_config(
     env: Mapping[str, str] | None = None,
     *,
@@ -276,6 +311,7 @@ def load_config(
     schema_mismatch = bool(cfg_schema_raw and cfg_schema_raw != CONFIG_SCHEMA_VERSION)
     cfg_schema = CONFIG_SCHEMA_VERSION
     home = _resolve_home(source)
+    log_path = _get_env(source, "ADAAD6_LOG_PATH") or _get_env(source, "LOG_PATH") or AdaadConfig.log_path
 
     sig_required_raw = _get_env(source, "CONFIG_SIG_REQUIRED")
     sig_required = _coerce_bool(sig_required_raw) if sig_required_raw else True
@@ -312,6 +348,7 @@ def load_config(
             planner_max_steps=1,
             planner_max_seconds=0.01,
             log_schema_version=_get_env(source, "LOG_SCHEMA_VERSION") or AdaadConfig.log_schema_version,
+            log_path=log_path,
             ledger_enabled=True,
             ledger_dir=_get_env(source, "LEDGER_DIR") or AdaadConfig.ledger_dir,
             ledger_filename=_get_env(source, "LEDGER_FILE") or _get_env(source, "LEDGER_FILENAME") or AdaadConfig.ledger_filename,
@@ -390,6 +427,7 @@ def load_config(
         resource_tier=tier,
         resource_scaling=scaling,
         log_schema_version=log_schema_version,
+        log_path=log_path,
         ledger_enabled=ledger_enabled or emergency_halt,
         ledger_dir=ledger_dir,
         ledger_filename=ledger_filename,
