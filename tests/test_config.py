@@ -65,6 +65,22 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             AdaadConfig(home="/home/user", log_path="../evil").validate()
 
+    def test_actions_dir_env_override(self) -> None:
+        cfg = load_config({"ADAAD6_ACTIONS_DIR": "custom/actions"})
+        self.assertEqual(cfg.actions_dir, "custom/actions")
+
+    def test_actions_dir_env_fallback(self) -> None:
+        cfg = load_config({"ACTIONS_DIR": "fallback/actions"})
+        self.assertEqual(cfg.actions_dir, "fallback/actions")
+
+    def test_actions_dir_required_and_sandboxed(self) -> None:
+        with self.assertRaises(ValueError):
+            AdaadConfig(actions_dir="   ").validate()
+        with self.assertRaises(ValueError):
+            AdaadConfig(actions_dir="/tmp/actions").validate()
+        with self.assertRaises(ValueError):
+            AdaadConfig(home="/home/user", actions_dir="../evil").validate()
+
 
 if __name__ == "__main__":
     unittest.main()
