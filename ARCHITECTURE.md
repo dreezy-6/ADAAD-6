@@ -234,10 +234,11 @@ Existing coverage:
 
 ---
 
-## Execution model (explicitly out of scope)
+## Execution model (explicitly out of determinism scope)
 
-ADAAD-6 does not ship an executor.
-If you build one, you must define and test your own invariants, including:
+ADAAD-6 ships an optional reference executor under `adaad6.runtime.executor`.
+Determinism claims apply only to planning and registry. Execution determinism is not claimed and depends on runtime + environment.
+If you build your own executor, define and test your invariants, including:
 - idempotency or retry semantics per action
 - subprocess and filesystem policies
 - network policies
@@ -246,6 +247,10 @@ If you build one, you must define and test your own invariants, including:
 Recommended separation:
 - Planner process produces plan JSON + config snapshot hash.
 - Executor process consumes plan JSON and emits an execution ledger.
+
+Failure taxonomy note:
+- Planner determinism violations still raise `DETERMINISM_BREACH`.
+- Runtime timeouts are also mapped to `DETERMINISM_BREACH` to keep a single audit code for unexpected nondeterminism or hung execution.
 
 ---
 
