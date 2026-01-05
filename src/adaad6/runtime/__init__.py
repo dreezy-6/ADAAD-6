@@ -1,3 +1,3 @@
 """Runtime components for ADAAD-6."""
 
-__all__ = ["boot", "health"]
+__all__ = ["boot", "executor", "health"]

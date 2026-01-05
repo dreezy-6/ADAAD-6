@@ -141,12 +141,14 @@ Non-goals:
 
 ## Design choices that reinforce non-autonomy
 
-### No executor in core
+### No executor in the planning core
 
-If the core executed actions, it would:
+If the planning core executed actions, it would:
 - require IO and process policies
 - require runtime capability controls
 - create non-deterministic failure modes
+
+An optional reference executor (`adaad6.runtime.executor`) exists for governed environments, but it is outside determinism guarantees and must be audited in its runtime context.
 
 ### ConfigSnapshot hashing
 
