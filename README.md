@@ -114,6 +114,7 @@ Limits are enforced during plan construction and recorded in `plan.meta`:
 Action implementations are loaded dynamically from a sandboxed directory.
 
 - **Config**: `AdaadConfig(actions_dir=".adaad/actions")`
+- **Built-ins**: pre-registered by the registry (see `adaad6.planning.actions.builtin_action_modules()`)
 - **Discovery**: `adaad6.planning.registry.discover_actions(...)`
 
 Safety guarantees:
@@ -146,6 +147,8 @@ ADAAD-6 is engineered for systems where predictability matters more than clevern
 - Embedded and mobile planning
 - CI-verified decision logic
 - Replayable and inspectable plans
+
+Planning is deterministic; action execution may depend on external runtimes and should be audited separately.
 
 ---
 
