@@ -51,6 +51,20 @@ class ConfigTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             AdaadConfig(ledger_enabled=True, ledger_schema_version="").validate()
 
+    def test_log_path_env_override(self) -> None:
+        cfg = load_config({"ADAAD6_LOG_PATH": "custom/logs.jsonl"})
+        self.assertEqual(cfg.log_path, "custom/logs.jsonl")
+
+    def test_log_path_required(self) -> None:
+        with self.assertRaises(ValueError):
+            AdaadConfig(log_path="   ").validate()
+
+    def test_log_path_must_be_relative_and_sandboxed(self) -> None:
+        with self.assertRaises(ValueError):
+            AdaadConfig(log_path="/tmp/out.jsonl").validate()
+        with self.assertRaises(ValueError):
+            AdaadConfig(home="/home/user", log_path="../evil").validate()
+
 
 if __name__ == "__main__":
     unittest.main()

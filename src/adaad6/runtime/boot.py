@@ -50,8 +50,9 @@ def boot_sequence(cfg: AdaadConfig | None = None) -> dict[str, Any]:
         "path": ledger_path,
         "error": ledger_error,
     }
+    ok = structure_ok and tree_law_ok and checks["config"] and (ledger_ok or not config.ledger_enabled)
     return {
-        "ok": structure_ok and tree_law_ok and checks["config"] and (ledger_ok or not config.ledger_enabled),
+        "ok": ok,
         "mutation_enabled": config.mutation_enabled,
         "limits": limits,
         "checks": checks,
