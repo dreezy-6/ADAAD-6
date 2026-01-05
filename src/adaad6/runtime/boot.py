@@ -18,6 +18,7 @@ def boot_sequence(cfg: AdaadConfig | None = None) -> dict[str, Any]:
     config.validate()
     structure_checks = health.check_structure_details(cfg=config)
     structure_ok = structure_checks["structure"]
+    tree_law_ok = bool(structure_checks.get("tree_law", True))
     ledger_dirs_ok = structure_checks["ledger_dirs"]
     ledger_ok = ledger_dirs_ok
     ledger_path = None
@@ -33,6 +34,7 @@ def boot_sequence(cfg: AdaadConfig | None = None) -> dict[str, Any]:
         ledger_ok = False
     checks = {
         "structure": structure_ok,
+        "tree_law": tree_law_ok,
         "config": True,
         "ledger": ledger_ok,
         "ledger_dirs": ledger_dirs_ok,
@@ -49,7 +51,7 @@ def boot_sequence(cfg: AdaadConfig | None = None) -> dict[str, Any]:
         "error": ledger_error,
     }
     return {
-        "ok": structure_ok and checks["config"] and (ledger_ok or not config.ledger_enabled),
+        "ok": structure_ok and tree_law_ok and checks["config"] and (ledger_ok or not config.ledger_enabled),
         "mutation_enabled": config.mutation_enabled,
         "limits": limits,
         "checks": checks,

@@ -20,7 +20,7 @@ class AdapterLedgerWriteTest(unittest.TestCase):
         with TemporaryDirectory() as tmpdir:
             base = Path(tmpdir) / ".adaad" / "ledger"
             base.mkdir(parents=True, exist_ok=True)
-            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(base), ledger_filename="events.jsonl", home_dir=tmpdir)
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(base), ledger_filename="events.jsonl", home=tmpdir)
             adapter = EchoAdapter()
             ts = "2024-05-05T05:05:05Z"
             intent = "echo"

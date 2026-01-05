@@ -23,6 +23,18 @@ class LedgerAppendOnlyTest(unittest.TestCase):
             self.assertEqual(events[1]["prev_hash"], first["hash"])
             self.assertTrue(verify_chain(events))
 
+    def test_append_rejects_when_ledger_readonly(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            cfg = AdaadConfig(
+                ledger_enabled=True,
+                ledger_dir=tmpdir,
+                ledger_filename="events.jsonl",
+                ledger_readonly=True,
+            )
+
+            with self.assertRaises(RuntimeError):
+                append_event(cfg, "alpha", {"value": 1}, "2024-01-01T00:00:00Z", "tester")
+
 
 if __name__ == "__main__":
     unittest.main()
