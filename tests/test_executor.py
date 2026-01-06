@@ -2,7 +2,7 @@ import tempfile
 import types
 import unittest
 
-from adaad6.config import AdaadConfig
+from adaad6.config import AdaadConfig, MutationPolicy, ResourceTier
 from adaad6.kernel.context import KernelContext
 from adaad6.kernel.failures import (
     DETERMINISM_BREACH,
@@ -15,15 +15,16 @@ from adaad6.planning.spec import ActionSpec
 from adaad6.runtime.executor import ExecutionLog, execute_plan
 from adaad6.runtime.executor import execute_and_record
 from adaad6.provenance.ledger import read_events
+from adaad6.runtime.gates import EvidenceStore, LineageGateResult
 
 
-def _spec(action: str, *, id_: str = "act-001") -> ActionSpec:
+def _spec(action: str, *, id_: str = "act-001", effects: tuple[str, ...] = ()) -> ActionSpec:
     return ActionSpec(
         id=id_,
         action=action,
         params={},
         preconditions=(),
-        effects=(),
+        effects=effects,
         cost_hint=None,
     )
 
@@ -364,6 +365,107 @@ class ExecutorTest(unittest.TestCase):
             )
             with self.assertRaises(RuntimeError):
                 execute_and_record(plan, actions=actions, cfg=cfg, ledger_required=False)
+
+    def test_execute_plan_requires_lineage_only_for_mutation_actions(self) -> None:
+        def validate(params, cfg):
+            return params
+
+        def run(validated):
+            return {"ok": True}
+
+        def postcheck(result, cfg):
+            return result
+
+        actions = {
+            "demo": _action_module("demo", validate, run, postcheck),
+            "mutate_code": _action_module("mutate_code", validate, run, postcheck),
+            "custom_mutator": _action_module("custom_mutator", validate, run, postcheck),
+        }
+        non_mutation_plan = [_spec("demo")]
+        mutation_plan = [_spec("mutate_code")]
+        mutation_plan_by_effect = [_spec("custom_mutator", id_="act-003", effects=("mutation",))]
+        cfg = AdaadConfig(
+            mutation_policy=MutationPolicy.EVOLUTIONARY,
+            resource_tier=ResourceTier.SERVER,
+            readiness_gate_sig="missing",
+        )
+        self.assertTrue(cfg.mutation_enabled)
+
+        # Non-mutation plans run even when mutation_policy enables mutation.
+        log_non_mutation = execute_plan(non_mutation_plan, actions=actions, cfg=cfg)
+        self.assertTrue(log_non_mutation.ok)
+
+        # Mutation plans require lineage proof.
+        with self.assertRaises(RuntimeError):
+            execute_plan(mutation_plan, actions=actions, cfg=cfg)
+        with self.assertRaises(RuntimeError):
+            execute_plan(mutation_plan_by_effect, actions=actions, cfg=cfg)
+
+        store = EvidenceStore()
+        lineage_hash = store.add_lineage({"ancestor": "root"})
+        cfg_ok = AdaadConfig(
+            mutation_policy=MutationPolicy.EVOLUTIONARY,
+            resource_tier=ResourceTier.SERVER,
+            readiness_gate_sig=lineage_hash,
+        )
+        self.assertTrue(cfg_ok.mutation_enabled)
+
+        log = execute_plan(mutation_plan, actions=actions, cfg=cfg_ok, evidence_store=store)
+        self.assertTrue(log.ok)
+        log_by_effect = execute_plan(mutation_plan_by_effect, actions=actions, cfg=cfg_ok, evidence_store=store)
+        self.assertTrue(log_by_effect.ok)
+
+    def test_execute_plan_can_use_precomputed_gate_result(self) -> None:
+        def validate(params, cfg):
+            return params
+
+        def run(validated):
+            return {"ok": True}
+
+        def postcheck(result, cfg):
+            return result
+
+        actions = {"mutate_code": _action_module("mutate_code", validate, run, postcheck)}
+        plan = [_spec("mutate_code")]
+        store = EvidenceStore()
+        lineage_hash = store.add_lineage({"ancestor": "root"})
+        cfg = AdaadConfig(
+            mutation_policy=MutationPolicy.EVOLUTIONARY,
+            resource_tier=ResourceTier.SERVER,
+            readiness_gate_sig=lineage_hash,
+        )
+        self.assertTrue(cfg.mutation_enabled)
+        ok_gate = LineageGateResult(ok=True, reason=None, lineage_hash=lineage_hash)
+
+        log = execute_plan(plan, actions=actions, cfg=cfg, gate_result=ok_gate, evidence_store=store)
+
+        self.assertTrue(log.ok)
+        mismatched_gate = LineageGateResult(ok=True, reason=None, lineage_hash="other")
+        with self.assertRaises(RuntimeError):
+            execute_plan(plan, actions=actions, cfg=cfg, gate_result=mismatched_gate, evidence_store=store)
+
+    def test_precomputed_gate_requires_backing_evidence(self) -> None:
+        def validate(params, cfg):
+            return params
+
+        def run(validated):
+            return {"ok": True}
+
+        def postcheck(result, cfg):
+            return result
+
+        actions = {"mutate_code": _action_module("mutate_code", validate, run, postcheck)}
+        plan = [_spec("mutate_code")]
+        cfg = AdaadConfig(
+            mutation_policy=MutationPolicy.EVOLUTIONARY,
+            resource_tier=ResourceTier.SERVER,
+            readiness_gate_sig="missing",
+        )
+        self.assertTrue(cfg.mutation_enabled)
+        ok_gate = LineageGateResult(ok=True, reason=None, lineage_hash="missing")
+
+        with self.assertRaises(RuntimeError):
+            execute_plan(plan, actions=actions, cfg=cfg, gate_result=ok_gate)
 
 
 if __name__ == "__main__":  # pragma: no cover
