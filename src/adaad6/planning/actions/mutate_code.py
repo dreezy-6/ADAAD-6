@@ -17,6 +17,7 @@ from typing import Any, Mapping
 
 from adaad6.config import AdaadConfig, MutationPolicy, ResourceTier
 from adaad6.provenance.ledger import append_event, ensure_ledger
+from adaad6.runtime.gates import EvidenceStore, cryovant_lineage_gate
 
 
 _ALLOWED_IMPORTS: tuple[str, ...] = (
@@ -268,11 +269,16 @@ def _record_ledger(cfg: AdaadConfig, payload: dict[str, Any]) -> Mapping[str, An
 def validate(params: dict[str, Any], cfg: AdaadConfig) -> dict[str, Any]:
     src = _coerce_source(params.get("src", ""))
     timeout = _coerce_timeout(params.get("timeout"), cfg=cfg)
+    evidence_store: EvidenceStore | None = params.get("evidence_store")
+    lineage_hash = params.get("lineage_hash") or cfg.readiness_gate_sig
     skip_reason: str | None = None
     if cfg.mutation_policy == MutationPolicy.LOCKED:
         skip_reason = "mutation_policy_locked"
     elif cfg.resource_tier == ResourceTier.MOBILE:
         skip_reason = "resource_tier=mobile"
+    gate = cryovant_lineage_gate(evidence_store=evidence_store, lineage_hash=lineage_hash)
+    if skip_reason is None and not gate.ok:
+        skip_reason = gate.reason or "cryovant_lineage_blocked"
     return {
         "src": src,
         "timeout": timeout,
@@ -280,6 +286,7 @@ def validate(params: dict[str, Any], cfg: AdaadConfig) -> dict[str, Any]:
         "resource_tier": cfg.resource_tier,
         "skip_reason": skip_reason,
         "cfg": cfg,
+        "lineage_hash": lineage_hash,
     }
 
 

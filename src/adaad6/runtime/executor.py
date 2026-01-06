@@ -19,6 +19,7 @@ from adaad6.kernel.context import KernelContext
 from adaad6.planning.registry import ActionModule
 from adaad6.planning.spec import ActionSpec
 from adaad6.provenance.ledger import append_event, ensure_ledger
+from adaad6.runtime.gates import EvidenceStore, LineageGateResult, cryovant_lineage_gate
 
 
 ARTIFACT_INLINE_MAX_BYTES = 65_536
@@ -219,6 +220,39 @@ def _payload_with_content_hash(payload: dict[str, Any]) -> dict[str, Any]:
     return base
 
 
+def _requires_lineage_gate(plan: Sequence[ActionSpec] | Iterable[ActionSpec]) -> bool:
+    mutation_actions = {"mutate_code", "mutate", "evolve", "autopromote", "autonomous_mutation"}
+    mutation_effects = {"mutation", "evolution"}
+    for spec in plan:
+        if spec.action in mutation_actions:
+            return True
+        effects = tuple(spec.effects or ())
+        if mutation_effects.intersection(set(effects)):
+            return True
+    return False
+
+
+def _enforce_lineage_gate(
+    plan_items: Sequence[ActionSpec] | Iterable[ActionSpec],
+    cfg: AdaadConfig,
+    *,
+    evidence_store: EvidenceStore | None,
+    lineage_hash: str | None,
+    gate_result: LineageGateResult | None,
+) -> None:
+    gate_required = cfg.mutation_enabled and _requires_lineage_gate(plan_items)
+    if not gate_required:
+        return
+    expected_lineage = lineage_hash or cfg.readiness_gate_sig
+    gate = gate_result or cryovant_lineage_gate(evidence_store=evidence_store, lineage_hash=expected_lineage)
+    if gate_result is not None and gate.lineage_hash != expected_lineage:
+        raise RuntimeError("Cryovant gate result not bound to requested lineage")
+    if gate_result is not None and (evidence_store is None or evidence_store.resolve_lineage(expected_lineage) is None):
+        raise RuntimeError("Cryovant gate result lacks evidence backing")
+    if not gate.ok:
+        raise RuntimeError(f"Cryovant lineage gate failed: {gate.reason}")
+
+
 def _run_plan(
     plan: Sequence[ActionSpec] | Iterable[ActionSpec],
     *,
@@ -314,10 +348,21 @@ def execute_plan(
     cfg: AdaadConfig,
     ctx: KernelContext | None = None,
     capture_debug: bool = False,
+    evidence_store: EvidenceStore | None = None,
+    lineage_hash: str | None = None,
+    gate_result: LineageGateResult | None = None,
 ) -> ExecutionLog:
     cfg.validate()
+    plan_items = tuple(plan)
+    _enforce_lineage_gate(
+        plan_items,
+        cfg,
+        evidence_store=evidence_store,
+        lineage_hash=lineage_hash,
+        gate_result=gate_result,
+    )
     context = ctx or KernelContext.build(cfg)
-    return _run_plan(plan, actions=actions, cfg=cfg, context=context, capture_debug=capture_debug)
+    return _run_plan(plan_items, actions=actions, cfg=cfg, context=context, capture_debug=capture_debug)
 
 
 def execute_and_record(
@@ -329,9 +374,19 @@ def execute_and_record(
     actor: str = "executor",
     ledger_required: bool = False,
     capture_debug: bool = False,
+    evidence_store: EvidenceStore | None = None,
+    lineage_hash: str | None = None,
+    gate_result: LineageGateResult | None = None,
 ) -> ExecutionLog:
     cfg.validate()
     plan_items = tuple(plan)
+    _enforce_lineage_gate(
+        plan_items,
+        cfg,
+        evidence_store=evidence_store,
+        lineage_hash=lineage_hash,
+        gate_result=gate_result,
+    )
     context = ctx or KernelContext.build(cfg)
     if ledger_required and not cfg.ledger_enabled:
         raise RuntimeError("ledger_required=True but ledger is disabled")

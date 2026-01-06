@@ -6,9 +6,15 @@ from typing import Any
 from adaad6.config import AdaadConfig, load_config
 from adaad6.runtime import health
 from adaad6.provenance.ledger import ensure_ledger
+from adaad6.runtime.gates import EvidenceStore, cryovant_lineage_gate
 
 
-def boot_sequence(cfg: AdaadConfig | None = None) -> dict[str, Any]:
+def boot_sequence(
+    cfg: AdaadConfig | None = None,
+    *,
+    evidence_store: EvidenceStore | None = None,
+    lineage_hash: str | None = None,
+) -> dict[str, Any]:
     config = cfg or load_config()
 
     if config.emergency_halt or not config.agents_enabled:
@@ -50,13 +56,19 @@ def boot_sequence(cfg: AdaadConfig | None = None) -> dict[str, Any]:
         "path": ledger_path,
         "error": ledger_error,
     }
+    gate = cryovant_lineage_gate(
+        evidence_store=evidence_store,
+        lineage_hash=lineage_hash or config.readiness_gate_sig,
+    )
+    mutation_enabled = bool(config.mutation_enabled and gate.ok)
     ok = structure_ok and tree_law_ok and checks["config"] and (ledger_ok or not config.ledger_enabled)
     return {
         "ok": ok,
-        "mutation_enabled": config.mutation_enabled,
+        "mutation_enabled": mutation_enabled,
         "limits": limits,
         "checks": checks,
         "ledger": ledger_status,
+        "cryovant_gate": {"ok": gate.ok, "reason": gate.reason},
         "build": {"version": config.version},
     }
 

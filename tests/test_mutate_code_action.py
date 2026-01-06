@@ -7,6 +7,13 @@ from unittest import mock
 
 from adaad6.config import AdaadConfig, MutationPolicy, ResourceTier
 from adaad6.planning.actions import mutate_code
+from adaad6.runtime.gates import EvidenceStore
+
+
+def _lineage():
+    store = EvidenceStore()
+    lineage_hash = store.add_lineage({"ancestor": "root"})
+    return store, lineage_hash
 
 
 class MutateCodeActionTest(unittest.TestCase):
@@ -37,8 +44,9 @@ class MutateCodeActionTest(unittest.TestCase):
         self.assertFalse(checked["doctor_gate_ok"])
 
     def test_allowlist_blocks_os_import(self) -> None:
+        evidence_store, lineage_hash = _lineage()
         cfg = AdaadConfig(mutation_policy=MutationPolicy.SANDBOXED, resource_tier=ResourceTier.SERVER)
-        validated = mutate_code.validate({"src": "import os\nx = 1"}, cfg)
+        validated = mutate_code.validate({"src": "import os\nx = 1", "evidence_store": evidence_store, "lineage_hash": lineage_hash}, cfg)
         result = mutate_code.run(validated)
         checked = mutate_code.postcheck(result, cfg)
 
@@ -50,8 +58,12 @@ class MutateCodeActionTest(unittest.TestCase):
         self.assertFalse(checked["doctor_gate_ok"])
 
     def test_successful_sandbox_exec_scores(self) -> None:
+        evidence_store, lineage_hash = _lineage()
         cfg = AdaadConfig(mutation_policy=MutationPolicy.SANDBOXED, resource_tier=ResourceTier.SERVER)
-        validated = mutate_code.validate({"src": "total = sum([1, 2, 3])\npass\n"}, cfg)
+        validated = mutate_code.validate(
+            {"src": "total = sum([1, 2, 3])\npass\n", "evidence_store": evidence_store, "lineage_hash": lineage_hash},
+            cfg,
+        )
         result = mutate_code.run(validated)
         checked = mutate_code.postcheck(result, cfg)
 
@@ -67,8 +79,13 @@ class MutateCodeActionTest(unittest.TestCase):
         self.assertIn("supported", checked["resource_caps"])
 
     def test_doctor_gate_required_for_autopromote(self) -> None:
-        cfg = AdaadConfig(mutation_policy=MutationPolicy.EVOLUTIONARY, resource_tier=ResourceTier.SERVER, readiness_gate_sig=None)
-        validated = mutate_code.validate({"src": "value = 42"}, cfg)
+        evidence_store, lineage_hash = _lineage()
+        cfg = AdaadConfig(
+            mutation_policy=MutationPolicy.EVOLUTIONARY,
+            resource_tier=ResourceTier.SERVER,
+            readiness_gate_sig=lineage_hash,
+        )
+        validated = mutate_code.validate({"src": "value = 42", "evidence_store": evidence_store}, cfg)
         result = mutate_code.run(validated)
         checked = mutate_code.postcheck(result, cfg)
 
@@ -85,8 +102,17 @@ class MutateCodeActionTest(unittest.TestCase):
             doctor_dir.mkdir(parents=True, exist_ok=True)
             (doctor_dir / "latest.json").write_text('{"status": "PASS"}', encoding="utf-8")
 
-            cfg = AdaadConfig(home=str(home), mutation_policy=MutationPolicy.EVOLUTIONARY, resource_tier=ResourceTier.SERVER)
-            validated = mutate_code.validate({"src": "value = 99\npass\n"}, cfg)
+            evidence_store, lineage_hash = _lineage()
+            cfg = AdaadConfig(
+                home=str(home),
+                mutation_policy=MutationPolicy.EVOLUTIONARY,
+                resource_tier=ResourceTier.SERVER,
+                readiness_gate_sig=lineage_hash,
+            )
+            validated = mutate_code.validate(
+                {"src": "value = 99\npass\n", "evidence_store": evidence_store},
+                cfg,
+            )
             result = mutate_code.run(validated)
             checked = mutate_code.postcheck(result, cfg)
 
@@ -97,8 +123,9 @@ class MutateCodeActionTest(unittest.TestCase):
             self.assertTrue(checked["doctor_gate_ok"])
 
     def test_timeout_kills_worker(self) -> None:
+        evidence_store, lineage_hash = _lineage()
         cfg = AdaadConfig(mutation_policy=MutationPolicy.SANDBOXED, resource_tier=ResourceTier.SERVER)
-        validated = mutate_code.validate({"src": "while True:\n    pass"}, cfg)
+        validated = mutate_code.validate({"src": "while True:\n    pass", "evidence_store": evidence_store, "lineage_hash": lineage_hash}, cfg)
         result = mutate_code.run(validated)
         checked = mutate_code.postcheck(result, cfg)
 
@@ -109,8 +136,9 @@ class MutateCodeActionTest(unittest.TestCase):
         self.assertFalse(checked["doctor_gate_ok"])
 
     def test_start_failure_is_reported(self) -> None:
+        evidence_store, lineage_hash = _lineage()
         cfg = AdaadConfig(mutation_policy=MutationPolicy.SANDBOXED, resource_tier=ResourceTier.SERVER)
-        validated = mutate_code.validate({"src": "x = 1"}, cfg)
+        validated = mutate_code.validate({"src": "x = 1", "evidence_store": evidence_store, "lineage_hash": lineage_hash}, cfg)
 
         with mock.patch("adaad6.planning.actions.mutate_code.mp.get_context") as get_ctx:
             ctx = mock.Mock()
@@ -129,6 +157,15 @@ class MutateCodeActionTest(unittest.TestCase):
         self.assertFalse(checked["timeout"])
         self.assertEqual(checked["reason"], "sandbox_start_failed")
         self.assertFalse(checked["skipped"])
+
+    def test_cryovant_lineage_required_before_mutation(self) -> None:
+        cfg = AdaadConfig(mutation_policy=MutationPolicy.SANDBOXED, resource_tier=ResourceTier.SERVER)
+        validated = mutate_code.validate({"src": "value = 5"}, cfg)
+        result = mutate_code.run(validated)
+        checked = mutate_code.postcheck(result, cfg)
+
+        self.assertTrue(checked["skipped"])
+        self.assertEqual(checked["reason"], "cryovant_lineage_missing")
 
 
 if __name__ == "__main__":

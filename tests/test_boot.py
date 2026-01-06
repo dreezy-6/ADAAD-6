@@ -2,7 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from adaad6.config import AdaadConfig
+from adaad6.config import AdaadConfig, MutationPolicy
+from adaad6.runtime.gates import EvidenceStore
 from adaad6.runtime.boot import boot_sequence
 
 
@@ -68,6 +69,25 @@ class BootSequenceTest(unittest.TestCase):
             self.assertFalse(result["checks"]["ledger"])
             self.assertIn("ledger_dirs", result["checks"])
             self.assertFalse(result["checks"]["ledger_dirs"])
+
+    def test_mutation_stays_disabled_without_cryovant_lineage(self) -> None:
+        cfg = AdaadConfig(mutation_policy=MutationPolicy.SANDBOXED, readiness_gate_sig="fake-lineage")
+
+        result = boot_sequence(cfg=cfg)
+
+        self.assertFalse(result["cryovant_gate"]["ok"])
+        self.assertFalse(result["mutation_enabled"])
+        self.assertEqual("cryovant_evidence_store_missing", result["cryovant_gate"]["reason"])
+
+    def test_mutation_enables_with_valid_cryovant_lineage(self) -> None:
+        evidence_store = EvidenceStore()
+        lineage_hash = evidence_store.add_lineage({"ancestor": "root", "stage": "alpha"})
+        cfg = AdaadConfig(mutation_policy=MutationPolicy.SANDBOXED, readiness_gate_sig=lineage_hash)
+
+        result = boot_sequence(cfg=cfg, evidence_store=evidence_store)
+
+        self.assertTrue(result["cryovant_gate"]["ok"])
+        self.assertTrue(result["mutation_enabled"])
 
 
 if __name__ == "__main__":
