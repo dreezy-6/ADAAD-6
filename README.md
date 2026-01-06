@@ -317,6 +317,5 @@ It optimizes for trust, determinism, and longevity, not novelty.
 
 License
 
-Specify your license here.
-
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for full terms.
 
