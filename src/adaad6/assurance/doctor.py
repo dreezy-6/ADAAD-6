@@ -24,16 +24,26 @@ def _check_config(config: AdaadConfig) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
-def _check_structure(config: AdaadConfig) -> dict[str, Any]:
-    details = check_structure_details(cfg=config)
+def _check_structure(config: AdaadConfig, *, details: dict[str, Any] | None = None) -> dict[str, Any]:
+    details = details or check_structure_details(cfg=config)
     details_sorted = dict(sorted(details.items()))
-    ok = bool(details.get("structure")) and bool(details.get("ledger_dirs"))
+    ok = (
+        bool(details.get("structure"))
+        and bool(details.get("ledger_dirs"))
+        and bool(details.get("ledger_feed", True))
+        and bool(details.get("telemetry_ok", True))
+    )
     return {"ok": ok, "details": details_sorted}
 
 
-def _check_ledger(config: AdaadConfig) -> dict[str, Any]:
+def _check_ledger(config: AdaadConfig, *, details: dict[str, Any] | None = None) -> dict[str, Any]:
     if not config.ledger_enabled:
         return {"ok": True, "skipped": True}
+    if details:
+        if not details.get("ledger_dirs", True):
+            return {"ok": False, "error": details.get("ledger_dirs_error"), "path": details.get("ledger_feed_path")}
+        if not details.get("ledger_feed", True):
+            return {"ok": False, "error": details.get("ledger_feed_error"), "path": details.get("ledger_feed_path")}
     try:
         path = ensure_ledger(config)
         return {"ok": True, "path": str(path)}
@@ -136,10 +146,11 @@ def run_doctor(cfg: AdaadConfig | None = None, *, scan_root: Path | None = None)
     config = cfg or load_config()
     run_id = uuid4().hex
 
+    health_details = check_structure_details(cfg=config)
     checks = {
         "config": _check_config(config),
-        "health": _check_structure(config),
-        "ledger": _check_ledger(config),
+        "health": _check_structure(config, details=health_details),
+        "ledger": _check_ledger(config, details=health_details),
         "pytest": _run_pytest_check(config),
         "static_scan": _check_static_scan(config, root=scan_root),
     }

@@ -141,6 +141,57 @@ class RuntimeHealthTest(unittest.TestCase):
                 self.assertFalse(result["tree_law"])
                 self.assertIn("_backdoor.py", result["tree_law_error"] or "")
 
+    def test_ledger_feed_missing_is_ok_but_unreadable_is_not(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ledger_dir = Path(tmpdir) / "ledger"
+            ledger_dir.mkdir(parents=True, exist_ok=True)
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(ledger_dir), home=tmpdir)
+
+            details = check_structure_details(cfg=cfg)
+
+            self.assertTrue(details["ledger_dirs"])
+            self.assertTrue(details["ledger_feed"])
+            self.assertEqual(details["ledger_feed_path"], str(ledger_dir / cfg.ledger_filename))
+
+            ledger_file = ledger_dir / cfg.ledger_filename
+            ledger_file.write_text("", encoding="utf-8")
+
+            from adaad6.runtime import health
+            from adaad6.provenance.ledger import ledger_path as cfg_ledger_path
+
+            original_probe = health._probe_feed
+            expected_path = cfg_ledger_path(cfg).resolve(strict=False)
+
+            def fake_probe(path: Path) -> tuple[bool, str | None]:
+                if path.resolve(strict=False) == expected_path:
+                    return False, "unreadable:nope"
+                return original_probe(path)
+
+            with patch("adaad6.runtime.health._probe_feed", side_effect=fake_probe):
+                unreadable = check_structure_details(cfg=cfg)
+
+            self.assertFalse(unreadable["ledger_feed"])
+            self.assertIn("unreadable", unreadable["ledger_feed_error"] or "")
+
+    def test_telemetry_exports_are_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = AdaadConfig(home=tmpdir, ledger_enabled=False, telemetry_exports=("telemetry/metrics.jsonl",))
+
+            details = check_structure_details(cfg=cfg)
+
+            self.assertFalse(details["telemetry_ok"])
+            self.assertEqual(len(details["telemetry_exports"]), 1)
+            self.assertFalse(details["telemetry_exports"][0]["ok"])
+
+            telemetry_path = Path(tmpdir) / "telemetry" / "metrics.jsonl"
+            telemetry_path.parent.mkdir(parents=True, exist_ok=True)
+            telemetry_path.write_text("{}", encoding="utf-8")
+
+            recovered = check_structure_details(cfg=cfg)
+
+            self.assertTrue(recovered["telemetry_ok"])
+            self.assertTrue(recovered["telemetry_exports"][0]["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()
