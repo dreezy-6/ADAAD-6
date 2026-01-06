@@ -45,6 +45,7 @@ def _allowed_files() -> set[str]:
         "config.py",
         "__main__.py",
         "cli.py",
+        "meta_orchestrator.py",
         "py.typed",
         "version.py",
         "_version.py",
