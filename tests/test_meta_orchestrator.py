@@ -11,6 +11,7 @@ from adaad6.planning.planner import Plan
 from adaad6.planning.spec import ActionSpec
 from adaad6.planning.registry import ActionModule
 from adaad6.provenance.ledger import read_events
+from adaad6.runtime.failure import OrchestrationFailure
 
 
 def _action_module(name: str, result: object | None = None) -> ActionModule:
@@ -61,6 +62,7 @@ def test_readiness_gate_freezes_mutation(tmp_path) -> None:
     assert result.config.freeze_reason is not None
     assert result.plan is not None and result.execution is not None
     assert result.execution.ok
+    assert result.failure_reason is None
 
 
 def test_lineage_gate_rejects_when_evidence_missing(tmp_path) -> None:
@@ -83,6 +85,7 @@ def test_lineage_gate_rejects_when_evidence_missing(tmp_path) -> None:
     assert result.execution is None
     assert result.ok is False
     assert result.lineage_gate is not None and result.lineage_gate.ok is False
+    assert result.failure_reason is OrchestrationFailure.LINEAGE_GATE_REJECTED
 
 
 def test_mutation_action_rejected_when_mutation_disabled(tmp_path) -> None:
@@ -97,6 +100,7 @@ def test_mutation_action_rejected_when_mutation_disabled(tmp_path) -> None:
     assert result.execution is None
     assert result.ok is False
     assert result.lineage_gate is not None
+    assert result.failure_reason is OrchestrationFailure.MUTATION_POLICY_BLOCKED
 
 
 def test_monetizer_ledger_events_are_chained(tmp_path) -> None:
@@ -113,6 +117,7 @@ def test_monetizer_ledger_events_are_chained(tmp_path) -> None:
 
     result = orch.run("grow revenue", cfg, plan_factory=plan_factory, action_builder=actions)
     assert result.execution is not None and result.execution.ok
+    assert result.failure_reason is None
 
     events = read_events(cfg)
     assert any(event["type"] == "monetizer_run_start" for event in events)
@@ -141,6 +146,7 @@ def test_plan_ordering_is_deterministic(tmp_path) -> None:
     assert serialized_first == serialized_second
     assert first.execution is not None and second.execution is not None
     assert first.execution.ok and second.execution.ok
+    assert first.failure_reason is None and second.failure_reason is None
 
 
 def test_gate_failure_prevents_execution(tmp_path) -> None:
@@ -177,3 +183,4 @@ def test_gate_failure_prevents_execution(tmp_path) -> None:
     assert result.execution is None
     assert result.ok is False
     assert call_count["run"] == 0
+    assert result.failure_reason is OrchestrationFailure.LINEAGE_GATE_REJECTED

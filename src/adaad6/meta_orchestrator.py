@@ -9,6 +9,7 @@ from adaad6.assurance.logging import canonical_json, compute_checksum
 from adaad6.config import AdaadConfig, enforce_readiness_gate
 from adaad6.planning.actions import builtin_action_names
 from adaad6.provenance.ledger import append_event
+from adaad6.runtime.failure import OrchestrationFailure
 
 if TYPE_CHECKING:
     from adaad6.kernel.context import KernelContext
@@ -30,6 +31,13 @@ class OrchestratorResult:
     execution: "ExecutionLog | None"
     boot: Mapping[str, Any]
     lineage_gate: "LineageGateResult | None"
+    failure_reason: OrchestrationFailure | None = None
+
+    def __post_init__(self) -> None:
+        if self.ok and self.failure_reason is not None:
+            raise ValueError("failure_reason must be None when ok=True")
+        if not self.ok and self.failure_reason is None:
+            raise ValueError("failure_reason must be set when ok=False")
 
 
 @dataclass(frozen=True)
@@ -155,9 +163,32 @@ class MetaOrchestrator:
         boot = boot_sequence(cfg=cfg_enforced, evidence_store=evidence_store, lineage_hash=lineage_hash)
 
         if cfg_enforced.emergency_halt or not cfg_enforced.agents_enabled or boot.get("frozen"):
-            return OrchestratorResult(False, cfg_enforced, None, None, boot, None)
+            failure = (
+                OrchestrationFailure.EMERGENCY_HALT
+                if cfg_enforced.emergency_halt
+                else OrchestrationFailure.AGENTS_DISABLED
+                if not cfg_enforced.agents_enabled
+                else OrchestrationFailure.BOOT_FAILED
+            )
+            return OrchestratorResult(
+                ok=False,
+                config=cfg_enforced,
+                plan=None,
+                execution=None,
+                boot=boot,
+                lineage_gate=None,
+                failure_reason=failure,
+            )
         if not boot.get("ok", False):
-            return OrchestratorResult(False, cfg_enforced, None, None, boot, None)
+            return OrchestratorResult(
+                ok=False,
+                config=cfg_enforced,
+                plan=None,
+                execution=None,
+                boot=boot,
+                lineage_gate=None,
+                failure_reason=OrchestrationFailure.BOOT_FAILED,
+            )
 
         actions_fn = action_builder or (lambda config: discover_actions(cfg=config))
         actions = dict(actions_fn(cfg_enforced))
@@ -179,9 +210,25 @@ class MetaOrchestrator:
                 lineage_hash=lineage_hash or cfg_enforced.readiness_gate_sig,
             )
             if not cfg_enforced.mutation_enabled:
-                return OrchestratorResult(False, cfg_enforced, plan, None, boot, gate_result)
+                return OrchestratorResult(
+                    ok=False,
+                    config=cfg_enforced,
+                    plan=plan,
+                    execution=None,
+                    boot=boot,
+                    lineage_gate=gate_result,
+                    failure_reason=OrchestrationFailure.MUTATION_POLICY_BLOCKED,
+                )
             if not gate_result.ok:
-                return OrchestratorResult(False, cfg_enforced, plan, None, boot, gate_result)
+                return OrchestratorResult(
+                    ok=False,
+                    config=cfg_enforced,
+                    plan=plan,
+                    execution=None,
+                    boot=boot,
+                    lineage_gate=gate_result,
+                    failure_reason=OrchestrationFailure.LINEAGE_GATE_REJECTED,
+                )
 
         ctx = context or KernelContext.build(cfg_enforced)
         if policy and policy.on_start:
@@ -200,7 +247,17 @@ class MetaOrchestrator:
         if policy and policy.on_complete:
             policy.on_complete(cfg_enforced, goal, execution)
 
-        return OrchestratorResult(execution.ok, cfg_enforced, plan, execution, boot, gate_result)
+        failure_reason = None if execution.ok else OrchestrationFailure.EXECUTION_FAILED
+
+        return OrchestratorResult(
+            ok=execution.ok,
+            config=cfg_enforced,
+            plan=plan,
+            execution=execution,
+            boot=boot,
+            lineage_gate=gate_result,
+            failure_reason=failure_reason,
+        )
 
 
 __all__ = [
