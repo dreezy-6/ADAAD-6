@@ -3,10 +3,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Callable, Mapping
+from typing import Callable, Iterable, Mapping
 
 ENV_PREFIX = "ADAAD6_"
 CONFIG_SCHEMA_VERSION = "1"
@@ -181,12 +181,15 @@ def _dev_env_key_provider(env: Mapping[str, str]) -> str | None:
     return _get_env(env, "CONFIG_SIG_KEY")
 
 
-def _canonical_env_payload(env: Mapping[str, str]) -> bytes:
+def _canonical_env_payload(env: Mapping[str, str], *, extra_excluded: Iterable[str] | None = None) -> bytes:
     excluded = {
         f"{ENV_PREFIX}CONFIG_SIG",
         f"{ENV_PREFIX}CONFIG_SIG_ALG",
         f"{ENV_PREFIX}CONFIG_SIG_KEY",
+        f"{ENV_PREFIX}READINESS_GATE_SIG",
     }
+    if extra_excluded:
+        excluded.update(extra_excluded)
     items = []
     for k, v in env.items():
         if not k.startswith(ENV_PREFIX):
@@ -223,6 +226,89 @@ def _verify_env_signature(
     payload = _canonical_env_payload(env)
     mac = hmac.new(key.encode("utf-8"), payload, hashlib.sha256).hexdigest()
     return hmac.compare_digest(mac, sig_hex.strip().lower())
+
+
+def _canonical_config_payload(cfg: AdaadConfig) -> bytes:
+    fields = {
+        "actions_dir": cfg.actions_dir,
+        "agents_enabled": cfg.agents_enabled,
+        "config_schema_version": cfg.config_schema_version,
+        "home": cfg.home,
+        "ledger_dir": cfg.ledger_dir,
+        "ledger_enabled": cfg.ledger_enabled,
+        "ledger_filename": cfg.ledger_filename,
+        "ledger_readonly": cfg.ledger_readonly,
+        "ledger_schema_version": cfg.ledger_schema_version,
+        "log_path": cfg.log_path,
+        "log_schema_version": cfg.log_schema_version,
+        "mode": cfg.mode.value,
+        "mutation_policy": cfg.mutation_policy.value,
+        "planner_max_seconds": cfg.planner_max_seconds,
+        "planner_max_steps": cfg.planner_max_steps,
+        "resource_scaling": cfg.resource_scaling,
+        "resource_tier": cfg.resource_tier.value,
+        "version": cfg.version,
+    }
+    ordered = [f"{key}={fields[key]}" for key in sorted(fields)]
+    return ("\n".join(ordered) + "\n").encode("utf-8")
+
+
+def _readiness_signature_payload(cfg: AdaadConfig, env: Mapping[str, str]) -> bytes:
+    return b"\n".join(
+        [
+            b"config",  # delimiter for clarity
+            _canonical_config_payload(cfg),
+            b"env",
+            _canonical_env_payload(env),
+        ]
+    )
+
+
+def compute_readiness_gate_signature(cfg: AdaadConfig, env: Mapping[str, str], *, key: str) -> str:
+    payload = _readiness_signature_payload(cfg, env)
+    return hmac.new(key.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+
+
+def verify_readiness_gate_signature(
+    cfg: AdaadConfig,
+    env: Mapping[str, str] | None = None,
+    *,
+    key_provider: Callable[[Mapping[str, str]], str | None] = _dev_env_key_provider,
+) -> tuple[bool, str | None]:
+    if cfg.mutation_policy != MutationPolicy.EVOLUTIONARY:
+        return True, None
+
+    source_env = env or os.environ
+    if cfg.mode == RunMode.PROD and _get_env(source_env, "CONFIG_SIG_KEY"):
+        return False, "READINESS_GATE_SIGNATURE_KEY_DISALLOWED_IN_PROD"
+
+    provided_sig = (cfg.readiness_gate_sig or "").strip().lower()
+    if not provided_sig:
+        return False, "READINESS_GATE_SIGNATURE_MISSING"
+
+    key = key_provider(source_env)
+    if not key:
+        return False, "READINESS_GATE_SIGNATURE_KEY_MISSING"
+
+    expected = compute_readiness_gate_signature(cfg, source_env, key=key)
+    if hmac.compare_digest(expected, provided_sig):
+        return True, None
+    return False, "READINESS_GATE_SIGNATURE_INVALID"
+
+
+def enforce_readiness_gate(
+    cfg: AdaadConfig,
+    env: Mapping[str, str] | None = None,
+    *,
+    key_provider: Callable[[Mapping[str, str]], str | None] = _dev_env_key_provider,
+) -> tuple[AdaadConfig, bool, str | None]:
+    if cfg.emergency_halt:
+        return cfg, True, None
+    ok, reason = verify_readiness_gate_signature(cfg, env=env, key_provider=key_provider)
+    if ok:
+        return cfg, True, None
+    frozen = replace(cfg, mutation_policy=MutationPolicy.LOCKED, freeze_reason=reason or cfg.freeze_reason)
+    return frozen, False, reason
 
 
 def _resolve_home(env: Mapping[str, str]) -> Path:
@@ -480,4 +566,13 @@ def load_config(
     return cfg
 
 
-__all__ = ["AdaadConfig", "MutationPolicy", "ResourceTier", "RunMode", "load_config"]
+__all__ = [
+    "AdaadConfig",
+    "MutationPolicy",
+    "ResourceTier",
+    "RunMode",
+    "compute_readiness_gate_signature",
+    "enforce_readiness_gate",
+    "load_config",
+    "verify_readiness_gate_signature",
+]

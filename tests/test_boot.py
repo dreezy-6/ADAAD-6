@@ -1,8 +1,11 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from dataclasses import replace
+from unittest.mock import patch
 
-from adaad6.config import AdaadConfig, MutationPolicy
+from adaad6.config import AdaadConfig, MutationPolicy, compute_readiness_gate_signature
 from adaad6.runtime.gates import EvidenceStore
 from adaad6.runtime.boot import boot_sequence
 
@@ -85,6 +88,38 @@ class BootSequenceTest(unittest.TestCase):
         cfg = AdaadConfig(mutation_policy=MutationPolicy.SANDBOXED, readiness_gate_sig=lineage_hash)
 
         result = boot_sequence(cfg=cfg, evidence_store=evidence_store)
+
+        self.assertTrue(result["cryovant_gate"]["ok"])
+        self.assertTrue(result["mutation_enabled"])
+
+    def test_evolutionary_freezes_when_signature_missing(self) -> None:
+        with patch.dict("os.environ", {"ADAAD6_CONFIG_SIG_KEY": "secret"}, clear=True):
+            cfg = AdaadConfig(mutation_policy=MutationPolicy.EVOLUTIONARY, readiness_gate_sig=None)
+
+            result = boot_sequence(cfg=cfg)
+
+        self.assertFalse(result["mutation_enabled"])
+        self.assertEqual(result["freeze_reason"], "READINESS_GATE_SIGNATURE_MISSING")
+        self.assertEqual(result["cryovant_gate"]["reason"], "READINESS_GATE_SIGNATURE_MISSING")
+
+    def test_evolutionary_freezes_when_signature_invalid(self) -> None:
+        with patch.dict("os.environ", {"ADAAD6_CONFIG_SIG_KEY": "secret"}, clear=True):
+            cfg = AdaadConfig(mutation_policy=MutationPolicy.EVOLUTIONARY, readiness_gate_sig="invalid")
+
+            result = boot_sequence(cfg=cfg)
+
+        self.assertFalse(result["mutation_enabled"])
+        self.assertEqual(result["freeze_reason"], "READINESS_GATE_SIGNATURE_INVALID")
+        self.assertEqual(result["cryovant_gate"]["reason"], "READINESS_GATE_SIGNATURE_INVALID")
+
+    def test_evolutionary_enables_when_signature_matches(self) -> None:
+        key = "secret"
+        with patch.dict("os.environ", {"ADAAD6_CONFIG_SIG_KEY": key}, clear=True):
+            base_cfg = AdaadConfig(mutation_policy=MutationPolicy.EVOLUTIONARY, readiness_gate_sig="pending")
+            sig = compute_readiness_gate_signature(base_cfg, os.environ, key=key)
+            cfg = replace(base_cfg, readiness_gate_sig=sig)
+
+            result = boot_sequence(cfg=cfg)
 
         self.assertTrue(result["cryovant_gate"]["ok"])
         self.assertTrue(result["mutation_enabled"])

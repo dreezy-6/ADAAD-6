@@ -15,7 +15,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from adaad6.config import AdaadConfig, MutationPolicy, ResourceTier
+from adaad6.config import AdaadConfig, MutationPolicy, ResourceTier, enforce_readiness_gate
 from adaad6.provenance.ledger import append_event, ensure_ledger
 from adaad6.runtime.gates import EvidenceStore, cryovant_lineage_gate
 
@@ -267,25 +267,32 @@ def _record_ledger(cfg: AdaadConfig, payload: dict[str, Any]) -> Mapping[str, An
 
 
 def validate(params: dict[str, Any], cfg: AdaadConfig) -> dict[str, Any]:
+    cfg_enforced, readiness_sig_ok, readiness_sig_reason = enforce_readiness_gate(cfg)
     src = _coerce_source(params.get("src", ""))
-    timeout = _coerce_timeout(params.get("timeout"), cfg=cfg)
+    timeout = _coerce_timeout(params.get("timeout"), cfg=cfg_enforced)
     evidence_store: EvidenceStore | None = params.get("evidence_store")
-    lineage_hash = params.get("lineage_hash") or cfg.readiness_gate_sig
+    lineage_hash = params.get("lineage_hash") or cfg_enforced.readiness_gate_sig
     skip_reason: str | None = None
-    if cfg.mutation_policy == MutationPolicy.LOCKED:
-        skip_reason = "mutation_policy_locked"
-    elif cfg.resource_tier == ResourceTier.MOBILE:
+    if cfg_enforced.mutation_policy == MutationPolicy.LOCKED:
+        skip_reason = cfg_enforced.freeze_reason or "mutation_policy_locked"
+    elif cfg_enforced.resource_tier == ResourceTier.MOBILE:
         skip_reason = "resource_tier=mobile"
-    gate = cryovant_lineage_gate(evidence_store=evidence_store, lineage_hash=lineage_hash)
-    if skip_reason is None and not gate.ok:
-        skip_reason = gate.reason or "cryovant_lineage_blocked"
+    if cfg_enforced.mutation_policy == MutationPolicy.EVOLUTIONARY:
+        gate_ok = readiness_sig_ok
+        gate_reason = readiness_sig_reason
+    else:
+        gate = cryovant_lineage_gate(evidence_store=evidence_store, lineage_hash=lineage_hash)
+        gate_ok = gate.ok
+        gate_reason = gate.reason
+    if skip_reason is None and not gate_ok:
+        skip_reason = gate_reason or "cryovant_lineage_blocked"
     return {
         "src": src,
         "timeout": timeout,
-        "policy": cfg.mutation_policy,
-        "resource_tier": cfg.resource_tier,
+        "policy": cfg_enforced.mutation_policy,
+        "resource_tier": cfg_enforced.resource_tier,
         "skip_reason": skip_reason,
-        "cfg": cfg,
+        "cfg": cfg_enforced,
         "lineage_hash": lineage_hash,
     }
 

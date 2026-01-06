@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from adaad6.config import AdaadConfig, load_config
+from adaad6.config import AdaadConfig, MutationPolicy, enforce_readiness_gate, load_config
 from adaad6.runtime import health
 from adaad6.provenance.ledger import ensure_ledger
-from adaad6.runtime.gates import EvidenceStore, cryovant_lineage_gate
+from adaad6.runtime.gates import EvidenceStore, LineageGateResult, cryovant_lineage_gate
 
 
 def boot_sequence(
@@ -15,7 +15,9 @@ def boot_sequence(
     evidence_store: EvidenceStore | None = None,
     lineage_hash: str | None = None,
 ) -> dict[str, Any]:
-    config = cfg or load_config()
+    original_cfg = cfg or load_config()
+    original_policy = original_cfg.mutation_policy
+    config, readiness_sig_ok, readiness_sig_reason = enforce_readiness_gate(original_cfg)
 
     if config.emergency_halt or not config.agents_enabled:
         frozen_reason = config.freeze_reason or ("EMERGENCY_HALT" if config.emergency_halt else None)
@@ -56,10 +58,17 @@ def boot_sequence(
         "path": ledger_path,
         "error": ledger_error,
     }
-    gate = cryovant_lineage_gate(
-        evidence_store=evidence_store,
-        lineage_hash=lineage_hash or config.readiness_gate_sig,
-    )
+    if original_policy == MutationPolicy.EVOLUTIONARY:
+        gate = LineageGateResult(
+            ok=bool(readiness_sig_ok),
+            reason=readiness_sig_reason,
+            lineage_hash=config.readiness_gate_sig,
+        )
+    else:
+        gate = cryovant_lineage_gate(
+            evidence_store=evidence_store,
+            lineage_hash=lineage_hash or config.readiness_gate_sig,
+        )
     mutation_enabled = bool(config.mutation_enabled and gate.ok)
     ok = structure_ok and tree_law_ok and checks["config"] and (ledger_ok or not config.ledger_enabled)
     return {
@@ -70,6 +79,7 @@ def boot_sequence(
         "ledger": ledger_status,
         "cryovant_gate": {"ok": gate.ok, "reason": gate.reason},
         "build": {"version": config.version},
+        "freeze_reason": config.freeze_reason,
     }
 
 
