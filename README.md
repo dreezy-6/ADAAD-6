@@ -126,6 +126,31 @@ src/adaad6/
 
 ---
 
+Installation
+
+Supported Python: 3.10 or newer.
+
+Install dependencies:
+
+pip install .
+
+Or install the published package:
+
+pip install adaad6
+
+Verify the CLI is available:
+
+adaad6 --help
+
+Minimal end-to-end example (local install):
+
+pip install . && adaad6 version
+
+The version command prints a stable, single-line version string suitable for scripts.
+
+
+---
+
 CLI Usage
 
 Show Version
@@ -291,6 +316,8 @@ Ledger correctness
 
 Template integrity
 
+Expected outcome: all tests should pass quickly on a local CPU-only environment without external services; no network access is required.
+
 
 
 ---
@@ -318,4 +345,3 @@ It optimizes for trust, determinism, and longevity, not novelty.
 License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for full terms.
-
