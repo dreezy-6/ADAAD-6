@@ -1,8 +1,11 @@
+import os
 import tempfile
 import types
 import unittest
+from dataclasses import replace
+from unittest.mock import patch
 
-from adaad6.config import AdaadConfig, MutationPolicy, ResourceTier
+from adaad6.config import AdaadConfig, MutationPolicy, ResourceTier, compute_readiness_gate_signature
 from adaad6.kernel.context import KernelContext
 from adaad6.kernel.failures import (
     DETERMINISM_BREACH,
@@ -385,7 +388,7 @@ class ExecutorTest(unittest.TestCase):
         mutation_plan = [_spec("mutate_code")]
         mutation_plan_by_effect = [_spec("custom_mutator", id_="act-003", effects=("mutation",))]
         cfg = AdaadConfig(
-            mutation_policy=MutationPolicy.EVOLUTIONARY,
+            mutation_policy=MutationPolicy.SANDBOXED,
             resource_tier=ResourceTier.SERVER,
             readiness_gate_sig="missing",
         )
@@ -403,17 +406,20 @@ class ExecutorTest(unittest.TestCase):
 
         store = EvidenceStore()
         lineage_hash = store.add_lineage({"ancestor": "root"})
-        cfg_ok = AdaadConfig(
-            mutation_policy=MutationPolicy.EVOLUTIONARY,
-            resource_tier=ResourceTier.SERVER,
-            readiness_gate_sig=lineage_hash,
-        )
-        self.assertTrue(cfg_ok.mutation_enabled)
+        with patch.dict("os.environ", {"ADAAD6_CONFIG_SIG_KEY": "secret"}, clear=True):
+            base_cfg = AdaadConfig(
+                mutation_policy=MutationPolicy.EVOLUTIONARY,
+                resource_tier=ResourceTier.SERVER,
+                readiness_gate_sig="pending",
+            )
+            sig = compute_readiness_gate_signature(base_cfg, os.environ, key="secret")
+            cfg_ok = replace(base_cfg, readiness_gate_sig=sig)
+            self.assertTrue(cfg_ok.mutation_enabled)
 
-        log = execute_plan(mutation_plan, actions=actions, cfg=cfg_ok, evidence_store=store)
-        self.assertTrue(log.ok)
-        log_by_effect = execute_plan(mutation_plan_by_effect, actions=actions, cfg=cfg_ok, evidence_store=store)
-        self.assertTrue(log_by_effect.ok)
+            log = execute_plan(mutation_plan, actions=actions, cfg=cfg_ok, evidence_store=store)
+            self.assertTrue(log.ok)
+            log_by_effect = execute_plan(mutation_plan_by_effect, actions=actions, cfg=cfg_ok, evidence_store=store)
+            self.assertTrue(log_by_effect.ok)
 
     def test_execute_plan_can_use_precomputed_gate_result(self) -> None:
         def validate(params, cfg):
@@ -430,7 +436,7 @@ class ExecutorTest(unittest.TestCase):
         store = EvidenceStore()
         lineage_hash = store.add_lineage({"ancestor": "root"})
         cfg = AdaadConfig(
-            mutation_policy=MutationPolicy.EVOLUTIONARY,
+            mutation_policy=MutationPolicy.SANDBOXED,
             resource_tier=ResourceTier.SERVER,
             readiness_gate_sig=lineage_hash,
         )
@@ -457,7 +463,7 @@ class ExecutorTest(unittest.TestCase):
         actions = {"mutate_code": _action_module("mutate_code", validate, run, postcheck)}
         plan = [_spec("mutate_code")]
         cfg = AdaadConfig(
-            mutation_policy=MutationPolicy.EVOLUTIONARY,
+            mutation_policy=MutationPolicy.SANDBOXED,
             resource_tier=ResourceTier.SERVER,
             readiness_gate_sig="missing",
         )
@@ -466,6 +472,68 @@ class ExecutorTest(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             execute_plan(plan, actions=actions, cfg=cfg, gate_result=ok_gate)
+
+    def test_execute_plan_enforces_readiness_signature_for_evolutionary(self) -> None:
+        def validate(params, cfg):
+            return params
+
+        def run(validated):
+            return {"ok": True}
+
+        def postcheck(result, cfg):
+            return result
+
+        actions = {"mutate_code": _action_module("mutate_code", validate, run, postcheck)}
+        plan = [_spec("mutate_code")]
+
+        with patch.dict("os.environ", {"ADAAD6_CONFIG_SIG_KEY": "secret"}, clear=True):
+            cfg_invalid = AdaadConfig(
+                mutation_policy=MutationPolicy.EVOLUTIONARY,
+                resource_tier=ResourceTier.SERVER,
+                readiness_gate_sig="invalid",
+            )
+            with self.assertRaises(RuntimeError):
+                execute_plan(plan, actions=actions, cfg=cfg_invalid)
+
+            base_cfg = AdaadConfig(
+                mutation_policy=MutationPolicy.EVOLUTIONARY,
+                resource_tier=ResourceTier.SERVER,
+                readiness_gate_sig="pending",
+            )
+            sig = compute_readiness_gate_signature(base_cfg, os.environ, key="secret")
+            cfg_valid = replace(base_cfg, readiness_gate_sig=sig)
+
+            log = execute_plan(plan, actions=actions, cfg=cfg_valid)
+
+        self.assertTrue(log.ok)
+        self.assertEqual("ok", log.status)
+
+    def test_execute_plan_allows_evolutionary_without_evidence_store_when_ready(self) -> None:
+        def validate(params, cfg):
+            return params
+
+        def run(validated):
+            return {"ok": True}
+
+        def postcheck(result, cfg):
+            return result
+
+        actions = {"mutate_code": _action_module("mutate_code", validate, run, postcheck)}
+        plan = [_spec("mutate_code")]
+
+        with patch.dict("os.environ", {"ADAAD6_CONFIG_SIG_KEY": "secret"}, clear=True):
+            base_cfg = AdaadConfig(
+                mutation_policy=MutationPolicy.EVOLUTIONARY,
+                resource_tier=ResourceTier.SERVER,
+                readiness_gate_sig="pending",
+            )
+            sig = compute_readiness_gate_signature(base_cfg, os.environ, key="secret")
+            cfg_valid = replace(base_cfg, readiness_gate_sig=sig)
+
+            log = execute_plan(plan, actions=actions, cfg=cfg_valid, evidence_store=None)
+
+        self.assertTrue(log.ok)
+        self.assertEqual("ok", log.status)
 
 
 if __name__ == "__main__":  # pragma: no cover

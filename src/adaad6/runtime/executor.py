@@ -9,7 +9,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import quote
 
 from adaad6.assurance.logging import canonical_json, compute_checksum
-from adaad6.config import AdaadConfig
+from adaad6.config import AdaadConfig, MutationPolicy, enforce_readiness_gate
 from adaad6.kernel.failures import (
     EVIDENCE_MISSING,
     KernelCrash,
@@ -240,6 +240,8 @@ def _enforce_lineage_gate(
     lineage_hash: str | None,
     gate_result: LineageGateResult | None,
 ) -> None:
+    if cfg.mutation_policy == MutationPolicy.EVOLUTIONARY:
+        return
     gate_required = cfg.mutation_enabled and _requires_lineage_gate(plan_items)
     if not gate_required:
         return
@@ -353,14 +355,13 @@ def execute_plan(
     gate_result: LineageGateResult | None = None,
 ) -> ExecutionLog:
     cfg.validate()
+    original_policy = cfg.mutation_policy
+    cfg, readiness_ok, readiness_reason = enforce_readiness_gate(cfg)
+    if original_policy == MutationPolicy.EVOLUTIONARY and not readiness_ok:
+        raise RuntimeError(f"Readiness gate failed: {readiness_reason}")
+    cfg.validate()
     plan_items = tuple(plan)
-    _enforce_lineage_gate(
-        plan_items,
-        cfg,
-        evidence_store=evidence_store,
-        lineage_hash=lineage_hash,
-        gate_result=gate_result,
-    )
+    _enforce_lineage_gate(plan_items, cfg, evidence_store=evidence_store, lineage_hash=lineage_hash, gate_result=gate_result)
     context = ctx or KernelContext.build(cfg)
     return _run_plan(plan_items, actions=actions, cfg=cfg, context=context, capture_debug=capture_debug)
 
@@ -379,14 +380,13 @@ def execute_and_record(
     gate_result: LineageGateResult | None = None,
 ) -> ExecutionLog:
     cfg.validate()
+    original_policy = cfg.mutation_policy
+    cfg, readiness_ok, readiness_reason = enforce_readiness_gate(cfg)
+    if original_policy == MutationPolicy.EVOLUTIONARY and not readiness_ok:
+        raise RuntimeError(f"Readiness gate failed: {readiness_reason}")
+    cfg.validate()
     plan_items = tuple(plan)
-    _enforce_lineage_gate(
-        plan_items,
-        cfg,
-        evidence_store=evidence_store,
-        lineage_hash=lineage_hash,
-        gate_result=gate_result,
-    )
+    _enforce_lineage_gate(plan_items, cfg, evidence_store=evidence_store, lineage_hash=lineage_hash, gate_result=gate_result)
     context = ctx or KernelContext.build(cfg)
     if ledger_required and not cfg.ledger_enabled:
         raise RuntimeError("ledger_required=True but ledger is disabled")

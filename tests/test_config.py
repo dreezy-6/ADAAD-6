@@ -1,6 +1,13 @@
 import unittest
 
-from adaad6.config import AdaadConfig, load_config
+from adaad6.config import (
+    AdaadConfig,
+    MutationPolicy,
+    RunMode,
+    enforce_readiness_gate,
+    load_config,
+    verify_readiness_gate_signature,
+)
 
 
 class ConfigTest(unittest.TestCase):
@@ -80,6 +87,27 @@ class ConfigTest(unittest.TestCase):
             AdaadConfig(actions_dir="/tmp/actions").validate()
         with self.assertRaises(ValueError):
             AdaadConfig(home="/home/user", actions_dir="../evil").validate()
+
+    def test_readiness_key_disallowed_in_prod_env(self) -> None:
+        env = {
+            "ADAAD6_CONFIG_SIG_KEY": "secret",
+            "ADAAD6_CONFIG_SIG_ALG": "HMAC-SHA256",
+        }
+        cfg = AdaadConfig(
+            mode=RunMode.PROD,
+            mutation_policy=MutationPolicy.EVOLUTIONARY,
+            readiness_gate_sig="pending",
+        )
+
+        ok, reason = verify_readiness_gate_signature(cfg, env)
+        self.assertFalse(ok)
+        self.assertEqual(reason, "READINESS_GATE_SIGNATURE_KEY_DISALLOWED_IN_PROD")
+
+        enforced, ok_enforced, reason_enforced = enforce_readiness_gate(cfg, env)
+        self.assertFalse(ok_enforced)
+        self.assertEqual(enforced.mutation_policy, MutationPolicy.LOCKED)
+        self.assertEqual(enforced.freeze_reason, "READINESS_GATE_SIGNATURE_KEY_DISALLOWED_IN_PROD")
+        self.assertEqual(reason_enforced, "READINESS_GATE_SIGNATURE_KEY_DISALLOWED_IN_PROD")
 
 
 if __name__ == "__main__":
