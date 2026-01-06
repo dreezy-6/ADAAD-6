@@ -52,6 +52,7 @@ class AdaadConfig:
 
     log_schema_version: str = "1"
     log_path: str = ".adaad/logs/adaad6.jsonl"
+    telemetry_exports: tuple[str, ...] = ()
 
     ledger_enabled: bool = False
     ledger_dir: str = ".adaad/ledger"
@@ -79,6 +80,10 @@ class AdaadConfig:
         elif self.ledger_file != self.ledger_filename:
             object.__setattr__(self, "ledger_file", self.ledger_filename)
 
+        telemetry_exports = tuple(self.telemetry_exports or ())
+        if telemetry_exports != self.telemetry_exports:
+            object.__setattr__(self, "telemetry_exports", telemetry_exports)
+
     def validate(self) -> None:
         if (self.config_schema_version or "").strip() != CONFIG_SCHEMA_VERSION:
             raise ValueError("config_schema_version mismatch")
@@ -104,6 +109,10 @@ class AdaadConfig:
             raise ValueError("ledger_filename must be set when ledger logging is enabled")
 
         _enforce_actions_dir_sandbox(self.actions_dir, home=home)
+
+        if self.telemetry_exports:
+            for path in self.telemetry_exports:
+                _enforce_log_path_sandbox(path, home=home)
 
         if self.ledger_enabled:
             # filename is a relative path only
@@ -247,6 +256,7 @@ def _canonical_config_payload(cfg: AdaadConfig) -> bytes:
         "planner_max_steps": cfg.planner_max_steps,
         "resource_scaling": cfg.resource_scaling,
         "resource_tier": cfg.resource_tier.value,
+        "telemetry_exports": ",".join(cfg.telemetry_exports),
         "version": cfg.version,
     }
     ordered = [f"{key}={fields[key]}" for key in sorted(fields)]
@@ -435,6 +445,12 @@ def load_config(
     home = _resolve_home(source)
     log_path = _get_env(source, "LOG_PATH") or AdaadConfig.log_path
     actions_dir = _get_env(source, "ACTIONS_DIR") or AdaadConfig.actions_dir
+    telemetry_exports_raw = _get_env(source, "TELEMETRY_EXPORTS")
+    telemetry_exports = tuple(
+        part.strip()
+        for part in (telemetry_exports_raw.split(",") if telemetry_exports_raw else ())
+        if part.strip()
+    )
 
     sig_required_raw = _get_env(source, "CONFIG_SIG_REQUIRED")
     sig_required = _coerce_bool(sig_required_raw) if sig_required_raw else True
@@ -486,6 +502,7 @@ def load_config(
             resource_scaling=_resource_scaling_for_tier(
                 _coerce_enum(_get_env(source, "RESOURCE_TIER") or "mobile", ResourceTier, "resource_tier")
             ),
+            telemetry_exports=telemetry_exports or AdaadConfig.telemetry_exports,
         )
         cfg.validate()
         return cfg
@@ -561,6 +578,7 @@ def load_config(
         emergency_halt=emergency_halt,
         agents_enabled=agents_enabled,
         freeze_reason="EMERGENCY_HALT" if emergency_halt else None,
+        telemetry_exports=telemetry_exports or AdaadConfig.telemetry_exports,
     )
     cfg.validate()
     return cfg

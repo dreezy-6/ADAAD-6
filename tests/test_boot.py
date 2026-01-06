@@ -6,6 +6,7 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from adaad6.config import AdaadConfig, MutationPolicy, compute_readiness_gate_signature
+from adaad6.runtime import health
 from adaad6.runtime.gates import EvidenceStore
 from adaad6.runtime.boot import boot_sequence
 
@@ -29,10 +30,14 @@ class BootSequenceTest(unittest.TestCase):
         self.assertTrue(result["ledger"]["dirs_ok"])
         self.assertIsNone(result["ledger"]["path"])
         self.assertIsNone(result["ledger"]["error"])
+        self.assertTrue(result["ledger"]["feed_ok"])
+        self.assertIsNone(result["ledger"]["feed_path"])
         self.assertIn("ledger", result["checks"])
         self.assertTrue(result["checks"]["ledger"])
         self.assertIn("ledger_dirs", result["checks"])
         self.assertTrue(result["checks"]["ledger_dirs"])
+        self.assertIn("telemetry", result["checks"])
+        self.assertTrue(result["checks"]["telemetry"])
 
     def test_boot_ledger_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -47,12 +52,15 @@ class BootSequenceTest(unittest.TestCase):
             self.assertTrue(result["ledger"]["dirs_ok"])
             self.assertEqual(Path(result["ledger"]["path"]).name, cfg.ledger_filename)
             self.assertTrue(Path(result["ledger"]["path"]).exists())
+            self.assertTrue(result["ledger"]["feed_ok"])
             self.assertTrue(result["ok"])
             self.assertIsNone(result["ledger"]["error"])
             self.assertIn("ledger", result["checks"])
             self.assertTrue(result["checks"]["ledger"])
             self.assertIn("ledger_dirs", result["checks"])
             self.assertTrue(result["checks"]["ledger_dirs"])
+            self.assertIn("telemetry", result["checks"])
+            self.assertTrue(result["checks"]["telemetry"])
 
     def test_boot_ledger_failure_sets_ok_false(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -67,11 +75,13 @@ class BootSequenceTest(unittest.TestCase):
             self.assertFalse(result["ledger"]["dirs_ok"])
             self.assertIsNone(result["ledger"]["path"])
             self.assertIsNotNone(result["ledger"]["error"])
+            self.assertFalse(result["ledger"]["feed_ok"])
             self.assertFalse(result["ok"])
             self.assertIn("ledger", result["checks"])
             self.assertFalse(result["checks"]["ledger"])
             self.assertIn("ledger_dirs", result["checks"])
             self.assertFalse(result["checks"]["ledger_dirs"])
+            self.assertIn("telemetry", result["checks"])
 
     def test_mutation_stays_disabled_without_cryovant_lineage(self) -> None:
         cfg = AdaadConfig(mutation_policy=MutationPolicy.SANDBOXED, readiness_gate_sig="fake-lineage")
@@ -123,6 +133,63 @@ class BootSequenceTest(unittest.TestCase):
 
         self.assertTrue(result["cryovant_gate"]["ok"])
         self.assertTrue(result["mutation_enabled"])
+
+    def test_boot_fails_when_telemetry_export_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = AdaadConfig(
+                home=tmpdir,
+                telemetry_exports=("telemetry/metrics.jsonl",),
+                ledger_enabled=False,
+            )
+
+            result = boot_sequence(cfg=cfg)
+
+            self.assertFalse(result["ok"])
+            self.assertFalse(result["checks"]["telemetry"])
+            self.assertFalse(result["telemetry"]["ok"])
+            self.assertEqual(len(result["telemetry"]["exports"]), 1)
+            self.assertFalse(result["telemetry"]["exports"][0]["ok"])
+
+            telemetry_path = Path(tmpdir) / "telemetry" / "metrics.jsonl"
+            telemetry_path.parent.mkdir(parents=True, exist_ok=True)
+            telemetry_path.write_text("{}", encoding="utf-8")
+
+            recovered = boot_sequence(cfg=cfg)
+
+            self.assertTrue(recovered["ok"])
+            self.assertTrue(recovered["checks"]["telemetry"])
+            self.assertTrue(recovered["telemetry"]["ok"])
+
+    def test_boot_fails_when_ledger_feed_unreadable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ledger_dir = Path(tmpdir) / ".adaad" / "ledger"
+            ledger_dir.mkdir(parents=True, exist_ok=True)
+            cfg = AdaadConfig(ledger_enabled=True, ledger_dir=str(ledger_dir), ledger_filename="events.jsonl", home=tmpdir)
+            from adaad6.provenance.ledger import ledger_path as cfg_ledger_path
+
+            ledger_path = cfg_ledger_path(cfg).resolve(strict=False)
+            ledger_path.parent.mkdir(parents=True, exist_ok=True)
+            ledger_path.write_text("", encoding="utf-8")
+
+            original_probe = health._probe_feed
+
+            def fake_probe(path: Path) -> tuple[bool, str | None]:
+                if path.resolve(strict=False) == ledger_path:
+                    return False, "unreadable:nope"
+                return original_probe(path)
+
+            with patch("adaad6.runtime.health._probe_feed", side_effect=fake_probe):
+                result = boot_sequence(cfg=cfg)
+
+            self.assertFalse(result["ok"])
+            self.assertFalse(result["ledger"]["feed_ok"])
+            self.assertFalse(result["checks"]["ledger"])
+
+            recovered = boot_sequence(cfg=cfg)
+
+            self.assertTrue(recovered["ok"])
+            self.assertTrue(recovered["ledger"]["ok"])
+            self.assertTrue(recovered["ledger"]["feed_ok"])
 
 
 if __name__ == "__main__":

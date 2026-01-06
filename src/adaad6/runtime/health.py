@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from adaad6.config import AdaadConfig
+from adaad6.provenance.ledger import ledger_path
 
 
 def _package_root() -> Path:
@@ -190,6 +191,49 @@ def _ledger_dirs_status(cfg: AdaadConfig) -> tuple[bool, str | None]:
     return True, None
 
 
+def _resolve_under_home(home: Path, raw: str) -> Path:
+    target = Path(raw)
+    candidate = target if target.is_absolute() else home / target
+    try:
+        return candidate.resolve(strict=False)
+    except TypeError:  # pragma: no cover - legacy
+        return Path(os.path.abspath(str(candidate)))
+
+
+def _probe_feed(path: Path) -> tuple[bool, str | None]:
+    if not path.exists():
+        return False, "missing"
+    if not path.is_file():
+        return False, "not_a_file"
+    try:
+        with path.open("r", encoding="utf-8"):
+            pass
+    except Exception as exc:
+        return False, f"unreadable:{exc}"
+    return True, None
+
+
+def _ledger_feed_status(cfg: AdaadConfig) -> tuple[bool, str | None, Path | None]:
+    if not cfg.ledger_enabled:
+        return True, None, None
+    path = ledger_path(cfg)
+    if not path.exists():
+        return True, None, path
+    ok, error = _probe_feed(path)
+    return ok, error, path
+
+
+def _telemetry_exports_status(cfg: AdaadConfig, *, home: Path) -> tuple[bool, list[dict[str, Any]]]:
+    statuses: list[dict[str, Any]] = []
+    overall_ok = True
+    for raw in cfg.telemetry_exports:
+        path = _resolve_under_home(home, raw)
+        ok, error = _probe_feed(path)
+        statuses.append({"path": str(path), "ok": ok, "error": error})
+        overall_ok = overall_ok and ok
+    return overall_ok, statuses
+
+
 def check_structure_details(cfg: AdaadConfig | None = None) -> dict[str, Any]:
     config = cfg or AdaadConfig()
 
@@ -199,11 +243,21 @@ def check_structure_details(cfg: AdaadConfig | None = None) -> dict[str, Any]:
 
     structure_ok = all(path.exists() for path in required) and tree_law_ok
     ledger_dirs_ok, ledger_error = _ledger_dirs_status(config)
+    home = Path(getattr(config, "home", ".")).expanduser().resolve()
+    ledger_feed_ok, ledger_feed_error, ledger_feed_path = _ledger_feed_status(config)
+    telemetry_exports_ok, telemetry_exports = _telemetry_exports_status(config, home=home)
+    if not ledger_dirs_ok:
+        ledger_feed_ok = False
 
     return {
         "structure": structure_ok,
         "ledger_dirs": ledger_dirs_ok,
         "ledger_dirs_error": ledger_error,
+        "ledger_feed": ledger_feed_ok,
+        "ledger_feed_error": ledger_feed_error,
+        "ledger_feed_path": str(ledger_feed_path) if ledger_feed_path else None,
+        "telemetry_ok": telemetry_exports_ok,
+        "telemetry_exports": telemetry_exports,
         "tree_law": tree_law_ok,
         "tree_law_error": tree_law_error,
     }
@@ -211,7 +265,7 @@ def check_structure_details(cfg: AdaadConfig | None = None) -> dict[str, Any]:
 
 def check_structure(cfg: AdaadConfig | None = None) -> bool:
     details = check_structure_details(cfg=cfg)
-    return bool(details["structure"] and details["ledger_dirs"])
+    return bool(details["structure"] and details["ledger_dirs"] and details.get("ledger_feed", True) and details.get("telemetry_ok", True))
 
 
 __all__ = ["check_structure", "check_structure_details"]
