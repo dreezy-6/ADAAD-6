@@ -21,5 +21,8 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"adaad6.planning.assets" = ["*.jsx"]
+
 [project.scripts]
 adaad6 = "adaad6.cli:main"
