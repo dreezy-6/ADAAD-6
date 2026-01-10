@@ -24,6 +24,7 @@ _BUILTIN_ACTION_MODULE_NAMES: tuple[str, ...] = (
     "doctor_gate",
     "summarize_results",
     "write_report",
+    "write_artifact",
 )
 
 

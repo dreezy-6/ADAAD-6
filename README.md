@@ -175,6 +175,10 @@ Scaffold Pipeline
 
 adaad6 template scaffold --destination scaffold.md
 
+Zenith UI Template
+
+adaad6 template zenith_ui --destination zenith_app.jsx
+
 > These commands do not execute actions.
 They emit deterministic Plan JSON suitable for review, storage, or downstream execution.
 

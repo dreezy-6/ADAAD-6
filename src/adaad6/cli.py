@@ -133,7 +133,7 @@ def _build_parser() -> argparse.ArgumentParser:
     template_parser = sub.add_parser("template", help="Emit a planning template JSON")
     template_parser.add_argument(
         "name",
-        choices=("doctor_report", "diff_report", "scaffold"),
+        choices=("doctor_report", "diff_report", "scaffold", "zenith_ui"),
         help="Template name to render",
     )
     template_parser.add_argument(
@@ -145,6 +145,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--base-ref",
         default="HEAD",
         help="Base git ref for diff_report templates",
+    )
+    template_parser.add_argument(
+        "--operator-name",
+        default=None,
+        help="Optional operator name for zenith_ui templates",
+    )
+    template_parser.add_argument(
+        "--org-name",
+        default=None,
+        help="Optional organization name for zenith_ui templates",
     )
 
     run_parser = sub.add_parser("run", help="Execute a deterministic adapter call")
@@ -262,6 +272,14 @@ def main(argv: list[str] | None = None) -> int:
                 template = compose_diff_report_template(
                     base_ref=getattr(args, "base_ref", "HEAD"),
                     destination=destination or "changelog.md",
+                ).to_dict()
+            elif args.name == "zenith_ui":
+                from adaad6.planning.templates import compose_zenith_ui_template
+
+                template = compose_zenith_ui_template(
+                    destination=destination or "zenith_app.jsx",
+                    operator_name=args.operator_name or "OPERATOR",
+                    org_name=args.org_name or "ORGANIZATION",
                 ).to_dict()
             else:
                 from adaad6.planning.templates import compose_scaffold_template

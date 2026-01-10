@@ -1,7 +1,21 @@
 from __future__ import annotations
 
+from importlib import resources
+
 from adaad6.planning.planner import Plan
 from adaad6.planning.spec import ActionSpec, validate_action_spec_list
+
+_OPERATOR_PLACEHOLDER = "__OPERATOR_NAME__"
+_ORG_PLACEHOLDER = "__ORG_NAME__"
+
+
+def _load_zenith_ui_source(operator_name: str, org_name: str) -> str:
+    source = (
+        resources.files("adaad6.planning.assets")
+        .joinpath("zenith_app.jsx")
+        .read_text(encoding="utf-8")
+    )
+    return source.replace(_OPERATOR_PLACEHOLDER, operator_name).replace(_ORG_PLACEHOLDER, org_name)
 
 
 def compose_scaffold_template(destination: str = "scaffold_report.txt") -> Plan:
@@ -156,4 +170,38 @@ def compose_diff_report_template(base_ref: str = "HEAD", destination: str = "cha
     return Plan(goal="diff_report", steps=steps, meta=meta)
 
 
-__all__ = ["compose_scaffold_template", "compose_doctor_report_template", "compose_diff_report_template"]
+def compose_zenith_ui_template(
+    destination: str = "zenith_app.jsx",
+    operator_name: str = "OPERATOR",
+    org_name: str = "ORGANIZATION",
+) -> Plan:
+    content = _load_zenith_ui_source(operator_name=operator_name, org_name=org_name)
+    steps = validate_action_spec_list(
+        [
+            ActionSpec(
+                id="write-zenith-ui",
+                action="write_artifact",
+                params={"destination": destination, "content": content, "content_type": "text/javascript"},
+                preconditions=(),
+                effects=("artifact_written",),
+                cost_hint=0.1,
+            )
+        ]
+    )
+    meta = {
+        "template": "zenith_ui",
+        "destination": destination,
+        "description": "Emit the Zenith React UI component source.",
+        "ledger": "record execution to ledger",
+        "operator_name": operator_name,
+        "org_name": org_name,
+    }
+    return Plan(goal="zenith_ui", steps=steps, meta=meta)
+
+
+__all__ = [
+    "compose_scaffold_template",
+    "compose_doctor_report_template",
+    "compose_diff_report_template",
+    "compose_zenith_ui_template",
+]
