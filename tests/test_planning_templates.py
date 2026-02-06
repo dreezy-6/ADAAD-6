@@ -1,6 +1,13 @@
 import unittest
 
-from adaad6.planning.templates import compose_diff_report_template, compose_doctor_report_template, compose_scaffold_template
+from adaad6.planning.templates import (
+    compose_diff_report_template,
+    compose_doctor_report_template,
+    compose_scaffold_template,
+    compose_zenith_ui_minimal_template,
+    compose_zenith_ui_template,
+    zenith_ui_content_hash,
+)
 
 
 class PlanningTemplatesTest(unittest.TestCase):
@@ -82,6 +89,27 @@ class PlanningTemplatesTest(unittest.TestCase):
         self.assertEqual(["summary_ready"], write["preconditions"])
         self.assertEqual(["report_written"], write["effects"])
         self.assertEqual("scaffold.md", write["params"]["destination"])
+
+    def test_compose_zenith_ui_template_uses_artifact_action(self) -> None:
+        plan = compose_zenith_ui_template(destination="zenith.jsx", operator_name="A", org_name="B").to_dict()
+        self.assertEqual("zenith_ui", plan["goal"])
+        self.assertEqual("A", plan["meta"]["operator_name"])
+        self.assertEqual("B", plan["meta"]["org_name"])
+        step = plan["steps"][0]
+        self.assertEqual("write_artifact", step["action"])
+        self.assertEqual(["artifact_written"], step["effects"])
+        self.assertEqual("text/javascript", step["params"]["content_type"])
+        self.assertIn("A", step["params"]["content"])
+        self.assertIn("B", step["params"]["content"])
+
+    def test_compose_zenith_ui_minimal_template_and_hash(self) -> None:
+        plan = compose_zenith_ui_minimal_template(destination="mini.jsx", operator_name="Op", org_name="Org").to_dict()
+        self.assertEqual("zenith_ui_minimal", plan["goal"])
+        self.assertEqual("mini.jsx", plan["meta"]["destination"])
+        step = plan["steps"][0]
+        self.assertEqual("write_artifact", step["action"])
+        self.assertIn("ZENITH_MINIMAL", step["params"]["content"])
+        self.assertEqual(64, len(zenith_ui_content_hash(operator_name="Op", org_name="Org", variant="minimal")))
 
 
 if __name__ == "__main__":  # pragma: no cover

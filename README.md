@@ -66,6 +66,7 @@ Post-checked
 Every action has a fixed schema contract.
 
 Failures are explicit, not implicit.
+Core artifact actions include `write_report` (audit/report payloads) and `write_artifact` (generic deterministic file artifacts such as JSX/UI assets).
 
 
 3. Built-in Planning Templates
@@ -174,6 +175,18 @@ adaad6 template diff_report --base-ref origin/main --destination changelog.md
 Scaffold Pipeline
 
 adaad6 template scaffold --destination scaffold.md
+
+Zenith UI Template
+
+adaad6 template zenith_ui --destination zenith_app.jsx --operator-name "OPERATOR" --org-name "ORG"
+
+Zenith UI Minimal Template
+
+adaad6 template zenith_ui_minimal --destination zenith_app_minimal.jsx
+
+Zenith Dry-Hash Mode
+
+adaad6 template zenith_ui --dry-hash --operator-name "OPERATOR" --org-name "ORG"
 
 > These commands do not execute actions.
 They emit deterministic Plan JSON suitable for review, storage, or downstream execution.

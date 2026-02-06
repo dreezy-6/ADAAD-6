@@ -133,7 +133,7 @@ def _build_parser() -> argparse.ArgumentParser:
     template_parser = sub.add_parser("template", help="Emit a planning template JSON")
     template_parser.add_argument(
         "name",
-        choices=("doctor_report", "diff_report", "scaffold"),
+        choices=("doctor_report", "diff_report", "scaffold", "zenith_ui", "zenith_ui_minimal"),
         help="Template name to render",
     )
     template_parser.add_argument(
@@ -145,6 +145,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--base-ref",
         default="HEAD",
         help="Base git ref for diff_report templates",
+    )
+    template_parser.add_argument(
+        "--operator-name",
+        default=None,
+        help="Optional operator name for zenith_ui templates",
+    )
+    template_parser.add_argument(
+        "--org-name",
+        default=None,
+        help="Optional organization name for zenith_ui templates",
+    )
+    template_parser.add_argument(
+        "--dry-hash",
+        action="store_true",
+        help="Emit content hash metadata only for zenith_ui templates",
     )
 
     run_parser = sub.add_parser("run", help="Execute a deterministic adapter call")
@@ -252,6 +267,8 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "template":
             destination = getattr(args, "destination", None)
+            if args.dry_hash and args.name not in {"zenith_ui", "zenith_ui_minimal"}:
+                parser.error("--dry-hash is only supported for zenith_ui templates")
             if args.name == "doctor_report":
                 from adaad6.planning.templates import compose_doctor_report_template
 
@@ -263,6 +280,51 @@ def main(argv: list[str] | None = None) -> int:
                     base_ref=getattr(args, "base_ref", "HEAD"),
                     destination=destination or "changelog.md",
                 ).to_dict()
+            elif args.name == "zenith_ui":
+                from adaad6.planning.templates import compose_zenith_ui_template, zenith_ui_content_hash
+
+                operator_name = args.operator_name or "OPERATOR"
+                org_name = args.org_name or "ORGANIZATION"
+
+                template = compose_zenith_ui_template(
+                    destination=destination or "zenith_app.jsx",
+                    operator_name=operator_name,
+                    org_name=org_name,
+                ).to_dict()
+                if args.dry_hash:
+                    content_hash = zenith_ui_content_hash(operator_name=operator_name, org_name=org_name)
+                    template["steps"][0]["params"] = {
+                        "destination": template["steps"][0]["params"]["destination"],
+                        "content_hash": content_hash,
+                        "content_type": template["steps"][0]["params"]["content_type"],
+                        "hash_algorithm": "sha256",
+                    }
+                    template["meta"]["dry_hash_only"] = True
+                    template["meta"]["content_hash"] = content_hash
+            elif args.name == "zenith_ui_minimal":
+                from adaad6.planning.templates import compose_zenith_ui_minimal_template, zenith_ui_content_hash
+
+                operator_name = args.operator_name or "OPERATOR"
+                org_name = args.org_name or "ORGANIZATION"
+                template = compose_zenith_ui_minimal_template(
+                    destination=destination or "zenith_app_minimal.jsx",
+                    operator_name=operator_name,
+                    org_name=org_name,
+                ).to_dict()
+                if args.dry_hash:
+                    content_hash = zenith_ui_content_hash(
+                        operator_name=operator_name,
+                        org_name=org_name,
+                        variant="minimal",
+                    )
+                    template["steps"][0]["params"] = {
+                        "destination": template["steps"][0]["params"]["destination"],
+                        "content_hash": content_hash,
+                        "content_type": template["steps"][0]["params"]["content_type"],
+                        "hash_algorithm": "sha256",
+                    }
+                    template["meta"]["dry_hash_only"] = True
+                    template["meta"]["content_hash"] = content_hash
             else:
                 from adaad6.planning.templates import compose_scaffold_template
 
