@@ -1,7 +1,31 @@
 from __future__ import annotations
 
+import hashlib
+from importlib import resources
+
 from adaad6.planning.planner import Plan
 from adaad6.planning.spec import ActionSpec, validate_action_spec_list
+
+_OPERATOR_PLACEHOLDER = "__OPERATOR_NAME__"
+_ORG_PLACEHOLDER = "__ORG_NAME__"
+
+
+def _load_template_asset(filename: str) -> str:
+    try:
+        return resources.files("adaad6.planning.assets").joinpath(filename).read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ValueError(f"planning asset missing: {filename}") from exc
+
+
+def render_zenith_ui_source(operator_name: str, org_name: str, *, variant: str = "full") -> str:
+    asset = "zenith_app_minimal.jsx" if variant == "minimal" else "zenith_app.jsx"
+    source = _load_template_asset(asset)
+    return source.replace(_OPERATOR_PLACEHOLDER, operator_name).replace(_ORG_PLACEHOLDER, org_name)
+
+
+def zenith_ui_content_hash(operator_name: str, org_name: str, *, variant: str = "full") -> str:
+    content = render_zenith_ui_source(operator_name=operator_name, org_name=org_name, variant=variant)
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def compose_scaffold_template(destination: str = "scaffold_report.txt") -> Plan:
@@ -156,4 +180,70 @@ def compose_diff_report_template(base_ref: str = "HEAD", destination: str = "cha
     return Plan(goal="diff_report", steps=steps, meta=meta)
 
 
-__all__ = ["compose_scaffold_template", "compose_doctor_report_template", "compose_diff_report_template"]
+def compose_zenith_ui_template(
+    destination: str = "zenith_app.jsx",
+    operator_name: str = "OPERATOR",
+    org_name: str = "ORGANIZATION",
+) -> Plan:
+    content = render_zenith_ui_source(operator_name=operator_name, org_name=org_name)
+    steps = validate_action_spec_list(
+        [
+            ActionSpec(
+                id="write-zenith-ui",
+                action="write_artifact",
+                params={"destination": destination, "content": content, "content_type": "text/javascript"},
+                preconditions=(),
+                effects=("artifact_written",),
+                cost_hint=0.1,
+            )
+        ]
+    )
+    meta = {
+        "template": "zenith_ui",
+        "destination": destination,
+        "description": "Emit the Zenith React UI component source.",
+        "ledger": "record execution to ledger",
+        "operator_name": operator_name,
+        "org_name": org_name,
+    }
+    return Plan(goal="zenith_ui", steps=steps, meta=meta)
+
+
+def compose_zenith_ui_minimal_template(
+    destination: str = "zenith_app_minimal.jsx",
+    operator_name: str = "OPERATOR",
+    org_name: str = "ORGANIZATION",
+) -> Plan:
+    content = render_zenith_ui_source(operator_name=operator_name, org_name=org_name, variant="minimal")
+    steps = validate_action_spec_list(
+        [
+            ActionSpec(
+                id="write-zenith-ui-minimal",
+                action="write_artifact",
+                params={"destination": destination, "content": content, "content_type": "text/javascript"},
+                preconditions=(),
+                effects=("artifact_written",),
+                cost_hint=0.05,
+            )
+        ]
+    )
+    meta = {
+        "template": "zenith_ui_minimal",
+        "destination": destination,
+        "description": "Emit a compact Zenith React UI component source.",
+        "ledger": "record execution to ledger",
+        "operator_name": operator_name,
+        "org_name": org_name,
+    }
+    return Plan(goal="zenith_ui_minimal", steps=steps, meta=meta)
+
+
+__all__ = [
+    "compose_scaffold_template",
+    "compose_doctor_report_template",
+    "compose_diff_report_template",
+    "compose_zenith_ui_template",
+    "compose_zenith_ui_minimal_template",
+    "render_zenith_ui_source",
+    "zenith_ui_content_hash",
+]
